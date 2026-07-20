@@ -66,6 +66,41 @@ def test_parse_1042s_extracts_labeled_values_and_page_provenance(
     ]
 
 
+def test_parse_1042s_skips_instruction_pages_and_uses_pypdf_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "form-1042s.pdf"
+    path.touch()
+    pdf = FakePdf(
+        [FakePage("Income code 06\nGross income 123.45\nFederal tax withheld 18.52")]
+    )
+    monkeypatch.setattr("kz_tax_report.f1042s_parser.pdfplumber.open", lambda _: pdf)
+    monkeypatch.setattr(
+        "kz_tax_report.f1042s_parser._pypdf_page_texts",
+        lambda _: [
+            "2025 Form 1042-S\n"
+            "Recipient's foreign taxpayer identification number 900101300123\n"
+            "Income code 06\nGross income 123.45\nFederal tax withheld 18.52",
+            "Instructions for Form 1042-S\nBox 1 Income code.",
+        ],
+    )
+
+    result = parse_f1042s(path)
+
+    assert result.to_dict("records") == [
+        {
+            "tax_year": 2025,
+            "recipient_tin": "900101300123",
+            "income_code": "06",
+            "gross_income": Decimal("123.45"),
+            "federal_tax_withheld": Decimal("18.52"),
+            "source_file": "form-1042s.pdf",
+            "source_page": 1,
+            "source_row": 1,
+        }
+    ]
+
+
 def test_parse_freedom_table_preserves_table_row_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -92,11 +127,77 @@ def test_parse_freedom_table_preserves_table_row_provenance(
             "date": "2025-02-01",
             "transaction_type": "Продажа",
             "symbol": "ETN",
+            "deal_number": "",
             "quantity": Decimal("2"),
             "profit": Decimal("10.50"),
+            "details": "",
             "source_file": "freedom.pdf",
             "source_page": 1,
             "source_table": 1,
+            "source_row": 2,
+        }
+    ]
+
+
+def test_parse_freedom_report_skips_summary_tables_and_accepts_ledger_without_ticker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "freedom.pdf"
+    path.touch()
+    pdf = FakePdf(
+        [
+            FakePage(
+                tables=[
+                    [
+                        ["Краткое содержание операций", None, None],
+                        ["Покупка", "10", "100"],
+                    ],
+                    [
+                        [
+                            "Номер сделки",
+                            "Дата",
+                            "Операция",
+                            "Цена USD",
+                            "Цена KZT",
+                            "Количество",
+                            "Сумма сделки USD",
+                            "Сумма сделки KZT",
+                            "Прибыль KZT",
+                            "Детали",
+                        ],
+                        [
+                            "DEAL-1",
+                            "01.02.2025 10:00:00",
+                            "Продажа",
+                            "1.25 $",
+                            "600.50 ₸",
+                            "2",
+                            "2.50 $",
+                            "1201.00 ₸",
+                            "200.75 ₸",
+                            "Продажа ETN",
+                        ],
+                    ],
+                ]
+            )
+        ]
+    )
+    monkeypatch.setattr("kz_tax_report.freedom_parser.pdfplumber.open", lambda _: pdf)
+
+    result = parse_freedom_report(path)
+
+    assert result.to_dict("records") == [
+        {
+            "date": "01.02.2025 10:00:00",
+            "transaction_type": "Продажа",
+            "symbol": "",
+            "deal_number": "DEAL-1",
+            "quantity": Decimal("2"),
+            "profit": Decimal("200.75"),
+            "details": "Продажа ETN",
+            "source_file": "freedom.pdf",
+            "source_page": 1,
+            "source_table": 2,
             "source_row": 2,
         }
     ]
@@ -181,3 +282,20 @@ def test_nbk_rate_provider_caches_xml_and_uses_cached_fallback(tmp_path: Path) -
         session=FakeSession(OSError("offline")),
     )
     assert offline.get_rate(date(2025, 2, 2), "USD") == Decimal("500.25")
+
+
+def test_nbk_rate_provider_uses_prior_cache_when_currency_is_absent(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "nbk-rates.json"
+    cache_path.write_text('{"2025-02-01": {"USD": "500.25"}}', encoding="utf-8")
+    holiday_response = FakeResponse(
+        b"<rates><item><title>EUR</title><description>520.10</description></item></rates>"
+    )
+    provider = NbkRateProvider(
+        cache_path,
+        url="https://example.test/rates",
+        session=FakeSession(holiday_response),
+    )
+
+    assert provider.get_rate(date(2025, 2, 2), "USD") == Decimal("500.25")

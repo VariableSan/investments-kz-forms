@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from kz_tax_report.tax_engine import RulesError, calculate_report, load_rules
+from kz_tax_report.config import get_rules_path
 
 
 def test_calculate_report_keeps_provenance_and_reconciles_sources(
@@ -78,6 +79,7 @@ income:
     f1042s = pd.DataFrame(
         [
             {
+                "income_code": "06",
                 "gross_income": Decimal("99"),
                 "federal_tax_withheld": Decimal("8"),
                 "source_file": "1042-s.pdf",
@@ -106,6 +108,96 @@ income:
     assert any("1042-S gross income" in warning for warning in result.warnings)
 
 
+def test_reconciliation_uses_only_dividend_1042s_and_normalizes_withholding_sign(
+    tmp_path: Path,
+) -> None:
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(
+        """
+year: 2025
+approved: true
+citation: Synthetic approved rule for tests
+tax:
+  rate: '0.10'
+  foreign_tax_credit: true
+income:
+  dividends_line: '270.01.01'
+  realized_gains_line: '270.01.02'
+  exempt_gains_line: '270.01.03'
+""",
+        encoding="utf-8",
+    )
+    sections = {
+        "Дивиденды": pd.DataFrame(
+            [
+                {
+                    "currency": "USD",
+                    "date": "2025-02-01",
+                    "description": "ACME dividend",
+                    "amount": 100,
+                    "source_file": "activity.csv",
+                    "source_row": 12,
+                }
+            ]
+        ),
+        "Удерживаемый налог": pd.DataFrame(
+            [
+                {
+                    "currency": "USD",
+                    "date": "2025-02-01",
+                    "description": "ACME withholding",
+                    "amount": -8,
+                    "source_file": "activity.csv",
+                    "source_row": 13,
+                }
+            ]
+        ),
+        "Реализованная и нереализованная П/У: отчет об эффективности": pd.DataFrame(
+            columns=[
+                "asset_class",
+                "symbol",
+                "realized_total",
+                "source_file",
+                "source_row",
+            ]
+        ),
+    }
+    f1042s = pd.DataFrame(
+        [
+            {
+                "income_code": "06",
+                "gross_income": Decimal("100"),
+                "federal_tax_withheld": Decimal("8"),
+                "source_file": "1042-s.pdf",
+                "source_page": 1,
+                "source_row": 3,
+            },
+            {
+                "income_code": "01",
+                "gross_income": Decimal("25"),
+                "federal_tax_withheld": Decimal("0"),
+                "source_file": "1042-s.pdf",
+                "source_page": 4,
+                "source_row": 3,
+            },
+        ]
+    )
+
+    result = calculate_report(
+        year=2025,
+        rules=load_rules(rules_path),
+        ibkr_sections=sections,
+        freedom_transactions=pd.DataFrame(
+            columns=["transaction_type", "profit", "source_file", "source_row"]
+        ),
+        f1042s_records=f1042s,
+    )
+
+    assert result.foreign_tax_credit == Decimal("8")
+    assert not any("does not reconcile" in warning for warning in result.warnings)
+    assert any("income code 01" in warning for warning in result.warnings)
+
+
 def test_unapproved_or_incomplete_rules_refuse_calculation(tmp_path: Path) -> None:
     rules_path = tmp_path / "rules.yaml"
     rules_path.write_text(
@@ -114,3 +206,8 @@ def test_unapproved_or_incomplete_rules_refuse_calculation(tmp_path: Path) -> No
 
     with pytest.raises(RulesError, match="approved"):
         load_rules(rules_path)
+
+
+def test_bundled_rules_refuse_calculation_until_officially_reviewed() -> None:
+    with pytest.raises(RulesError, match="approved"):
+        load_rules(get_rules_path(2025))

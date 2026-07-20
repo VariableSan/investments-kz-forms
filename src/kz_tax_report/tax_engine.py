@@ -96,7 +96,9 @@ def calculate_report(
     """Calculate tax inputs while retaining a source reference for every value."""
 
     if rules.year != year:
-        raise RulesError(f"Rules year {rules.year} does not match requested year {year}")
+        raise RulesError(
+            f"Rules year {rules.year} does not match requested year {year}"
+        )
 
     dividends = extract_dividends(ibkr_sections)
     withholding = extract_withholding_tax(ibkr_sections)
@@ -123,11 +125,16 @@ def calculate_report(
     ].to_dict("records"):
         values.append(_trace("exempt_gain", row["profit"], row))
 
-    f1042s_gross = _sum(f1042s_records, "gross_income")
-    withheld = _sum(f1042s_records, "federal_tax_withheld")
+    dividend_f1042s = _dividend_1042s_records(f1042s_records)
+    f1042s_gross = _sum(dividend_f1042s, "gross_income")
+    withheld = abs(_sum(dividend_f1042s, "federal_tax_withheld"))
     warnings = _reconciliation_warnings(
-        taxable_dividends, _sum(withholding, "amount"), f1042s_gross, withheld
+        taxable_dividends,
+        abs(_sum(withholding, "amount")),
+        f1042s_gross,
+        withheld,
     )
+    warnings.extend(_non_dividend_1042s_warnings(f1042s_records))
     tax_before_credit = _money(
         (taxable_dividends + taxable_realized_gains) * rules.rate
     )
@@ -185,6 +192,30 @@ def _trace(category: str, amount: object, row: dict[str, Any]) -> TraceableValue
 
 def _is_sale(value: object) -> bool:
     return str(value).casefold() in {"продажа", "sale", "sell"}
+
+
+def _dividend_1042s_records(records: pd.DataFrame) -> pd.DataFrame:
+    if "income_code" not in records:
+        raise ValueError("1042-S records are missing income_code")
+    codes = records["income_code"].astype(str).str.zfill(2)
+    return records[codes == "06"]
+
+
+def _non_dividend_1042s_warnings(records: pd.DataFrame) -> list[str]:
+    if "income_code" not in records:
+        return []
+    codes = sorted(
+        {
+            str(code).zfill(2)
+            for code in records["income_code"]
+            if str(code).zfill(2) != "06"
+        }
+    )
+    return [
+        f"1042-S income code {code} is not included in the dividend calculation "
+        "and requires manual review."
+        for code in codes
+    ]
 
 
 def _reconciliation_warnings(

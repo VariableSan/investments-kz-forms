@@ -19,6 +19,10 @@ from kz_tax_report.config import (
 __all__ = ["DEFAULT_NBK_URL", "NbkRateProvider", "get_nbk_rate"]
 
 
+class NbkRateNotAvailableError(ValueError):
+    """Raised when the NBK response has no rate for the requested currency."""
+
+
 class NbkRateProvider:
     """Fetch NBK daily rates and fall back to the latest cached prior rate."""
 
@@ -53,6 +57,7 @@ class NbkRateProvider:
         except (
             ElementTree.ParseError,
             InvalidOperation,
+            NbkRateNotAvailableError,
             OSError,
             requests.RequestException,
         ) as error:
@@ -80,7 +85,9 @@ class NbkRateProvider:
             if title == currency:
                 value = (item.findtext("description") or "").strip().replace(",", ".")
                 return Decimal(value)
-        raise ValueError(f"Currency {currency} is missing from NBK response")
+        raise NbkRateNotAvailableError(
+            f"Currency {currency} is missing from NBK response"
+        )
 
     def _read_cache(self) -> dict[str, dict[str, str]]:
         if not self.cache_path.exists():
