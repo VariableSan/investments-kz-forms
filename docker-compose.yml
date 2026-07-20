@@ -1,0 +1,9 @@
+services:
+  app:
+    build:
+      context: .
+    image: kz-tax-report:local
+    volumes:
+      - ./data:/inputs:ro
+      - ./output:/outputs
+    working_dir: /app

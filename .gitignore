@@ -1,0 +1,17 @@
+data/**
+!data/.gitkeep
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+output/
+work/
+cache/
+.env
+__pycache__/
+*.py[cod]
+dist/
+build/
+*.egg-info/
+tmp/
