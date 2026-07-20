@@ -3,9 +3,10 @@
 Local-first Python 3.12 tooling for preparing traceable inputs for Kazakhstan
 Form 270.00 / Appendix 270.01 from IBKR and Freedom Bank reports.
 
-The project is currently in foundation development. The calculation pipeline
-will be implemented CLI-first. A browser UI is planned as a later NiceGUI
-phase and is not exposed by the current Compose file.
+The project provides both a CLI and a local NiceGUI browser workflow. Both
+paths use the same parsers and report model. The browser workflow keeps each
+client's uploads in an isolated temporary directory and removes them when the
+client disconnects.
 
 ## Privacy Boundary
 
@@ -59,19 +60,22 @@ report is optional and must not be required for a normal run.
 
 ## CLI
 
-The CLI entry point is scaffolded but calculation modules are still under
-construction. The intended invocation is:
+The CLI calculates a source-traceable report and writes both XLSX and Markdown
+outputs. Rules must be explicitly approved and can be supplied with `--rules`:
 
 ```bash
 uv run kz-tax-report --ibkr path/to/activity.csv \
 	--freedom path/to/freedom.pdf \
 	--f1042s path/to/1042s.pdf \
 	--year 2025 \
+	--rules path/to/approved-rules-2025.yaml \
 	--out output/report.xlsx
 ```
 
-Generated reports will include source-row provenance, reconciliation warnings,
-and a Markdown summary for manual entry. No electronic filing is supported.
+Generated reports include source-row provenance, reconciliation warnings, and a
+Markdown summary for manual entry. The bundled year file is intentionally
+unapproved until its official citation and values have been reviewed. No
+electronic filing is supported.
 
 ## Docker Batch Mode
 
@@ -83,10 +87,40 @@ mkdir -p output
 docker compose run --rm app --help
 ```
 
-The future web UI may be published to the LAN without built-in authentication,
-as explicitly selected for this project. That deployment would allow any
-reachable LAN peer to access uploaded PII and must never be treated as
-internet-safe.
+Runtime settings can be supplied through environment variables. Copy
+`example.env` to `.env` before using Docker Compose and adjust the values that
+depend on the deployment. The application keeps built-in fallback values when
+these variables are absent or empty. Explicit CLI options such as `--rules`
+still take precedence over environment settings.
+
+Supported application variables are `KZ_TAX_REPORT_NBK_URL`,
+`KZ_TAX_REPORT_NBK_TIMEOUT`, `KZ_TAX_REPORT_NBK_CACHE_PATH`, and
+`KZ_TAX_REPORT_RULES_DIR`. `INPUTS_HOST_DIR` and `OUTPUT_HOST_DIR` control the
+host-side Compose mounts.
+
+The web UI may be published to the LAN without built-in authentication, as
+explicitly selected for this project. That deployment allows any reachable LAN
+peer to access uploaded PII and must never be treated as internet-safe.
+
+## Browser UI
+
+Run the local UI on `127.0.0.1:8080`:
+
+```bash
+make web
+```
+
+For a LAN deployment using Compose, review the privacy warning and run:
+
+```bash
+make docker-build
+make docker-web
+```
+
+The UI accepts an IBKR CSV, Freedom Bank PDF, and 1042-S PDF, then shows the
+calculated totals and reconciliation warnings before offering XLSX and
+Markdown downloads. It does not transmit files to a tax authority or cloud
+service.
 
 ## Tax Rules Disclaimer
 
@@ -100,4 +134,4 @@ unapproved or incomplete rule files.
 
 The durable implementation context is in `tmp/plans/00-overview.md`. Attach it
 to every future coding session. Numbered plans describe the foundation,
-parsers, external sources and FIFO, tax/report CLI, and deferred web UI phases.
+parsers, external sources and FIFO, tax/report CLI, and web UI phases.

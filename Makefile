@@ -6,7 +6,7 @@ FREEDOM ?=
 F1042S ?=
 OUT ?= output/report.xlsx
 
-.PHONY: install test test-one lint format-check lint-fix format run docker-build docker-cli
+.PHONY: install test test-one lint format-check lint-fix format run web docker-build docker-cli docker-web
 
 install:
 	uv sync
@@ -32,8 +32,14 @@ format:
 run:
 	uv run kz-tax-report --year $(YEAR) --ibkr $(IBKR) --freedom $(FREEDOM) --f1042s $(F1042S) --out $(OUT)
 
+web:
+	uv run kz-tax-report-ui
+
 docker-build:
 	docker build -t kz-tax-report:local .
 
 docker-cli:
 	docker compose run --rm app --help
+
+docker-web:
+	docker compose --profile web up web

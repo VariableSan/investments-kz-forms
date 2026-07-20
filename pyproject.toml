@@ -5,6 +5,7 @@ description = "Local-first calculator for Kazakhstan investment tax declaration 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "nicegui>=2.24.0",
     "openpyxl>=3.1.5",
     "pandas>=3.0.3",
     "pdfplumber>=0.11.10",
@@ -12,11 +13,13 @@ dependencies = [
     "pypdf>=6.14.2",
     "pyyaml>=6.0.3",
     "requests>=2.34.2",
+    "nicegui>=2.24.0",
     "typer>=0.27.0",
 ]
 
 [project.scripts]
 kz-tax-report = "kz_tax_report.cli:main"
+kz-tax-report-ui = "kz_tax_report.web_ui:main"
 
 [build-system]
 requires = ["uv_build>=0.10.10,<0.11.0"]

@@ -1,0 +1,10 @@
+year: 2025
+approved: false
+citation: "Pending verification against the official Kazakhstan Tax Code and Form 270.01 instructions."
+tax:
+  rate: "0.10"
+  foreign_tax_credit: true
+income:
+  dividends_line: "270.01.01"
+  realized_gains_line: "270.01.02"
+  exempt_gains_line: "270.01.03"

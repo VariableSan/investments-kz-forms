@@ -4,6 +4,25 @@ services:
       context: .
     image: kz-tax-report:local
     volumes:
-      - ./data:/inputs:ro
-      - ./output:/outputs
+      - ${INPUTS_HOST_DIR:-./data}:/inputs:ro
+      - ${OUTPUT_HOST_DIR:-./output}:/outputs
+    environment:
+      KZ_TAX_REPORT_NBK_URL: ${KZ_TAX_REPORT_NBK_URL:-}
+      KZ_TAX_REPORT_NBK_TIMEOUT: ${KZ_TAX_REPORT_NBK_TIMEOUT:-}
+      KZ_TAX_REPORT_NBK_CACHE_PATH: ${KZ_TAX_REPORT_NBK_CACHE_PATH:-}
+      KZ_TAX_REPORT_RULES_DIR: ${KZ_TAX_REPORT_RULES_DIR:-}
     working_dir: /app
+
+  web:
+    profiles: [web]
+    build:
+      context: .
+    image: kz-tax-report:local
+    ports:
+      - "${KZ_TAX_REPORT_UI_PORT:-8080}:8080"
+    environment:
+      KZ_TAX_REPORT_UI_HOST: 0.0.0.0
+      KZ_TAX_REPORT_UI_PORT: 8080
+      KZ_TAX_REPORT_RULES_DIR: ${KZ_TAX_REPORT_RULES_DIR:-}
+    working_dir: /app
+    command: ["/app/.venv/bin/kz-tax-report-ui"]
