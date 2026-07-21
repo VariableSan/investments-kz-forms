@@ -20,9 +20,43 @@ services:
     image: kz-tax-report:local
     ports:
       - "${KZ_TAX_REPORT_UI_PORT:-8080}:8080"
+    volumes:
+      - ${OUTPUT_HOST_DIR:-./output}:/outputs
     environment:
       KZ_TAX_REPORT_UI_HOST: 0.0.0.0
       KZ_TAX_REPORT_UI_PORT: 8080
+      KZ_TAX_REPORT_ARTIFACT_MODE: local
+      KZ_TAX_REPORT_ARTIFACT_DIR: /tmp/kz-tax-report-jobs
+      KZ_TAX_REPORT_OUTPUT_DIR: /outputs
       KZ_TAX_REPORT_RULES_DIR: ${KZ_TAX_REPORT_RULES_DIR:-}
     working_dir: /app
     command: ["/app/.venv/bin/kz-tax-report-ui"]
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web-hosted:
+    profiles: [hosted]
+    build:
+      context: .
+    image: kz-tax-report:local
+    ports:
+      - "${KZ_TAX_REPORT_UI_PORT:-8080}:8080"
+    environment:
+      KZ_TAX_REPORT_UI_HOST: 0.0.0.0
+      KZ_TAX_REPORT_UI_PORT: 8080
+      KZ_TAX_REPORT_ARTIFACT_MODE: hosted
+      KZ_TAX_REPORT_ARTIFACT_DIR: /tmp/kz-tax-report-jobs
+      KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS: ${KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS:-3600}
+      KZ_TAX_REPORT_RULES_DIR: ${KZ_TAX_REPORT_RULES_DIR:-}
+    working_dir: /app
+    command: ["/app/.venv/bin/kz-tax-report-ui"]
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

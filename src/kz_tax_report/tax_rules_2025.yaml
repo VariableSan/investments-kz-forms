@@ -1,6 +1,13 @@
 year: 2025
 approved: false
 citation: "Pending verification against the official Kazakhstan Tax Code and Form 270.01 instructions."
+conversion_policy: "NBK rate on payment or disposal date; previous published rate for non-business days"
+form_labels:
+  dividends: "Foreign dividends gross"
+  realized_gains: "Foreign capital gains"
+  exempt_gains: "Exempt Freedom gains"
+exemptions:
+  - "AIX ETN"
 tax:
   rate: "0.10"
   foreign_tax_credit: true

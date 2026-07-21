@@ -1,29 +1,29 @@
 """Local NiceGUI interface for reviewing and downloading tax report inputs."""
 
+import json
 import os
-from tempfile import TemporaryDirectory
+from uuid import uuid4
 
-from nicegui import app, events, ui
+from nicegui import events, ui
 
-from kz_tax_report.app_service import CalculationWorkspace, InputValidationError
+from kz_tax_report.app_service import (
+    ArtifactJobManager,
+    ArtifactPolicy,
+    InputValidationError,
+    export_artifacts,
+)
+from kz_tax_report.config import get_rules_path
+from kz_tax_report.rules_workspace import RulesDraftError, TaxRulesDraft
+from kz_tax_report.source_evidence import fetch_source_evidence
 from kz_tax_report.tax_engine import RulesError
-
-
-def create_workspace() -> tuple[TemporaryDirectory[str], CalculationWorkspace]:
-    temporary_directory = TemporaryDirectory(prefix="kz-tax-report-")
-    return temporary_directory, CalculationWorkspace(temporary_directory.name)
 
 
 @ui.page("/")
 def index() -> None:
-    temporary_directory, workspace = create_workspace()
+    artifact_manager = ArtifactJobManager(ArtifactPolicy.from_environment())
+    job = artifact_manager.create(uuid4().hex)
+    workspace = job.workspace
     state: dict[str, object] = {"artifacts": None}
-
-    def cleanup() -> None:
-        workspace.cleanup()
-        temporary_directory.cleanup()
-
-    app.on_disconnect(cleanup)
 
     ui.add_head_html(
         """
@@ -53,6 +53,141 @@ def index() -> None:
                 "Tax year", value=2025, min=2000, max=2100, format="%.0f"
             ).classes("w-40")
             status = ui.label("Waiting for source reports").classes("text-gray-600")
+
+        try:
+            rules_draft = TaxRulesDraft.from_path(get_rules_path(2025))
+        except RulesDraftError as error:
+            rules_draft = TaxRulesDraft({"year": 2025, "approved": False})
+            ui.notify(str(error), type="negative")
+
+        with ui.expansion("Tax rules for this session", icon="tune").classes("w-full"):
+            ui.label(
+                "Edits stay in this browser session and never overwrite the bundled YAML. "
+                "Approval is a manual acknowledgement, not an automatic legal check."
+            ).classes("text-sm text-gray-600")
+            with ui.row().classes("w-full flex-wrap gap-4"):
+                rules_rate = ui.input(
+                    "Tax rate",
+                    value=str(rules_draft.document.get("tax", {}).get("rate", "")),
+                ).classes("w-40")
+                rules_citation = ui.input(
+                    "Citation", value=str(rules_draft.document.get("citation", ""))
+                ).classes("min-w-80 grow")
+                rules_mrp = ui.input(
+                    "MRP", value=str(rules_draft.document.get("mrp", ""))
+                ).classes("w-40")
+                rules_brackets = ui.textarea(
+                    "Tax brackets JSON",
+                    value=json.dumps(
+                        rules_draft.document.get("tax", {}).get("brackets", [])
+                    ),
+                ).classes("min-w-80 grow")
+                rules_approved = ui.checkbox(
+                    "Approved", value=rules_draft.approved
+                ).classes("pt-2")
+            with ui.row().classes("w-full flex-wrap gap-4"):
+                income_document = rules_draft.document.get("income", {})
+                rules_lines = {
+                    key: ui.input(
+                        key.replace("_", " ").title(),
+                        value=str(income_document.get(key, "")),
+                    ).classes("min-w-52 grow")
+                    for key in (
+                        "dividends_line",
+                        "realized_gains_line",
+                        "exempt_gains_line",
+                    )
+                }
+            with ui.row().classes("w-full flex-wrap gap-4"):
+                label_document = rules_draft.document.get("form_labels", {})
+                rules_labels = {
+                    key: ui.input(
+                        f"Form label: {key.replace('_', ' ')}",
+                        value=str(label_document.get(key, "")),
+                    ).classes("min-w-52 grow")
+                    for key in ("dividends", "realized_gains", "exempt_gains")
+                }
+
+            source_keys = (
+                "tax_code",
+                "form_instructions",
+                "mrp",
+                "nbk_rates",
+                "treaty_credit",
+                "aix_exemption",
+            )
+            source_controls: dict[str, tuple[object, object]] = {}
+            with ui.expansion(
+                "Official references and evidence", icon="fact_check"
+            ).classes("w-full"):
+                ui.label(
+                    "Fetching records availability and HTTP metadata only. It never reads rates or approves rules."
+                ).classes("text-sm text-gray-600")
+                source_document = rules_draft.document.get("sources", {})
+                evidence_document = rules_draft.document.get("source_evidence", {})
+                for source_key in source_keys:
+                    with ui.row().classes("w-full items-end gap-3"):
+                        citation = ui.input(
+                            source_key.replace("_", " ").title(),
+                            value=str(source_document.get(source_key, "")),
+                        ).classes("grow")
+                        evidence_status = ui.label(
+                            _evidence_summary(evidence_document.get(source_key, {}))
+                        ).classes("text-sm text-gray-600")
+                        source_controls[source_key] = (citation, evidence_status)
+
+                        def fetch_evidence(
+                            key: str = source_key,
+                            status_control: object = evidence_status,
+                        ) -> None:
+                            evidence = fetch_source_evidence(key)
+                            rules_draft.set_source_evidence(evidence.as_dict())
+                            status_control.set_text(
+                                _evidence_summary(evidence.as_dict())
+                            )
+                            ui.notify(
+                                f"{key}: evidence {'recorded' if evidence.ok else 'failed'}",
+                                type="positive" if evidence.ok else "warning",
+                            )
+
+                        ui.button(
+                            "Fetch evidence",
+                            icon="cloud_download",
+                            on_click=fetch_evidence,
+                        )
+
+            def reset_rules() -> None:
+                try:
+                    fresh = TaxRulesDraft.from_path(get_rules_path(int(year.value)))
+                except (OSError, RulesDraftError, ValueError) as error:
+                    ui.notify(str(error), type="negative")
+                    return
+                rules_draft.document = fresh.document
+                rules_rate.value = str(rules_draft.document["tax"]["rate"])
+                rules_citation.value = str(rules_draft.document["citation"])
+                rules_mrp.value = str(rules_draft.document.get("mrp", ""))
+                rules_brackets.value = json.dumps(
+                    rules_draft.document.get("tax", {}).get("brackets", [])
+                )
+                rules_approved.value = rules_draft.approved
+                for key, control in rules_lines.items():
+                    control.value = str(rules_draft.document["income"][key])
+                for key, control in rules_labels.items():
+                    control.value = str(
+                        rules_draft.document.get("form_labels", {}).get(key, "")
+                    )
+                for key, (citation, status_control) in source_controls.items():
+                    citation.value = str(
+                        rules_draft.document.get("sources", {}).get(key, "")
+                    )
+                    status_control.set_text(
+                        _evidence_summary(
+                            rules_draft.document.get("source_evidence", {}).get(key, {})
+                        )
+                    )
+                ui.notify("Rules reset from the year-specific YAML")
+
+            ui.button("Reset from YAML", icon="restart_alt", on_click=reset_rules)
 
         uploads: dict[str, object] = {}
         upload_specs = (
@@ -87,8 +222,43 @@ def index() -> None:
         def calculate() -> None:
             result_area.clear()
             try:
-                artifacts = workspace.calculate(int(year.value))
-            except (InputValidationError, OSError, RulesError, ValueError) as error:
+                rules_draft.set_tax_rate(str(rules_rate.value))
+                rules_draft.set_citation(str(rules_citation.value))
+                if str(rules_mrp.value).strip():
+                    rules_draft.set_mrp(str(rules_mrp.value))
+                if str(rules_brackets.value).strip():
+                    brackets = json.loads(str(rules_brackets.value))
+                    if not isinstance(brackets, list):
+                        raise RulesDraftError("Tax brackets must be a JSON list")
+                    rules_draft.set_brackets(brackets)
+                rules_draft.set_approved(bool(rules_approved.value))
+                for key, control in rules_lines.items():
+                    rules_draft.set_income_line(key, str(control.value))
+                for key, control in rules_labels.items():
+                    rules_draft.set_form_label(key, str(control.value))
+                for key, (citation, _) in source_controls.items():
+                    if str(citation.value).strip():
+                        rules_draft.set_source_citation(key, str(citation.value))
+                session_rules = rules_draft.materialize(workspace.root / "rules")
+                rules_draft.validate_for_calculation(int(year.value), session_rules)
+                artifacts = workspace.calculate(
+                    int(year.value), rules_path=session_rules
+                )
+                exported_paths = None
+                if artifact_manager.policy.mode == "local":
+                    exported_paths = export_artifacts(
+                        artifacts.xlsx_path,
+                        artifacts.markdown_path,
+                        os.environ.get("KZ_TAX_REPORT_OUTPUT_DIR", "/outputs"),
+                        f"form-270-{int(year.value)}-{job.job_id[:12]}",
+                    )
+            except (
+                InputValidationError,
+                OSError,
+                RulesDraftError,
+                RulesError,
+                ValueError,
+            ) as error:
                 status.set_text(str(error))
                 ui.notify(str(error), type="negative")
                 return
@@ -96,6 +266,10 @@ def index() -> None:
             report = artifacts.report
             status.set_text("Calculation complete; review warnings before downloading")
             with result_area:
+                if exported_paths is not None:
+                    ui.label(
+                        f"Local copies: {exported_paths[0]} and {exported_paths[1]}"
+                    ).classes("text-sm text-gray-600")
                 ui.label(f"Results for {report.year}").classes("text-2xl font-bold")
                 with ui.row().classes("w-full flex-wrap gap-3"):
                     for label, value in (
@@ -131,6 +305,14 @@ def index() -> None:
         ui.button("Calculate report", icon="calculate", on_click=calculate).classes(
             "bg-[#2b7668] text-white"
         )
+
+
+def _evidence_summary(evidence: object) -> str:
+    if not isinstance(evidence, dict) or not evidence:
+        return "Not fetched"
+    if evidence.get("error"):
+        return f"Failed: {evidence['error']}"
+    return f"HTTP {evidence.get('status_code', '?')} at {evidence.get('retrieved_at', '?')}"
 
 
 def main() -> None:

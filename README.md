@@ -4,9 +4,11 @@ Local-first Python 3.12 tooling for preparing traceable inputs for Kazakhstan
 Form 270.00 / Appendix 270.01 from IBKR and Freedom Bank reports.
 
 The project provides both a CLI and a local NiceGUI browser workflow. Both
-paths use the same parsers and report model. The browser workflow keeps each
-client's uploads in an isolated temporary directory and removes them when the
-client disconnects.
+paths use the same parsers and report model. The browser workflow assigns each
+connection an opaque, owner-bound job directory with restrictive permissions.
+Jobs are cleaned up by a configurable TTL so downloads are not invalidated by
+browser disconnects. Rules edited in the browser are session-only and are
+never written back to the bundled YAML.
 
 ## Privacy Boundary
 
@@ -93,14 +95,38 @@ depend on the deployment. The application keeps built-in fallback values when
 these variables are absent or empty. Explicit CLI options such as `--rules`
 still take precedence over environment settings.
 
-Supported application variables are `KZ_TAX_REPORT_NBK_URL`,
+Supported application variables include `KZ_TAX_REPORT_NBK_URL`,
 `KZ_TAX_REPORT_NBK_TIMEOUT`, `KZ_TAX_REPORT_NBK_CACHE_PATH`, and
-`KZ_TAX_REPORT_RULES_DIR`. `INPUTS_HOST_DIR` and `OUTPUT_HOST_DIR` control the
-host-side Compose mounts.
+`KZ_TAX_REPORT_RULES_DIR`. Browser artifact policy is controlled by
+`KZ_TAX_REPORT_ARTIFACT_DIR`, `KZ_TAX_REPORT_ARTIFACT_MODE`,
+`KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS`, `KZ_TAX_REPORT_MAX_UPLOAD_BYTES`, and
+`KZ_TAX_REPORT_MAX_JOB_BYTES`. `INPUTS_HOST_DIR` and `OUTPUT_HOST_DIR` control
+the host-side Compose mounts.
 
 The web UI may be published to the LAN without built-in authentication, as
 explicitly selected for this project. That deployment allows any reachable LAN
 peer to access uploaded PII and must never be treated as internet-safe.
+The local Docker web profile mounts `OUTPUT_HOST_DIR` at `/outputs`; after a
+successful calculation the UI both downloads the reports in the browser and
+writes collision-safe XLSX/Markdown copies to that mount. These copies contain
+financial data and should be removed according to your local retention policy.
+
+For local Docker use, create the output directory before starting the service
+and make it writable by the image's non-root UID (`10001`):
+
+```bash
+mkdir -p output
+chown 10001:10001 output
+make docker-web
+```
+
+The `hosted` Compose profile intentionally has no host output mount. It streams
+browser downloads from TTL-managed job directories and removes expired jobs;
+it does not publish a static report directory. Start it with
+`docker compose --profile hosted up web-hosted`. The local profile uses a
+default 24-hour TTL, while the hosted profile defaults to one hour. Both
+profiles enforce per-file and per-job upload limits. Compose health checks
+probe the UI root endpoint every 30 seconds.
 
 ## Browser UI
 
@@ -119,7 +145,9 @@ make docker-web
 
 The UI accepts an IBKR CSV, Freedom Bank PDF, and 1042-S PDF, then shows the
 calculated totals and reconciliation warnings before offering XLSX and
-Markdown downloads. It does not transmit files to a tax authority or cloud
+Markdown downloads. The Tax rules panel starts with the year-specific YAML,
+provides a separate manual `Approved` toggle, and materializes edits only in
+the current session. It does not transmit files to a tax authority or cloud
 service.
 
 ## Tax Rules Disclaimer

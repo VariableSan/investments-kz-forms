@@ -684,7 +684,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "nicegui", specifier = ">=2.24.0" },
+    { name = "nicegui", specifier = "==3.14.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=3.0.3" },
     { name = "pdfplumber", specifier = ">=0.11.10" },

@@ -8,12 +8,13 @@ from kz_tax_report.tax_engine import TaxReport
 
 
 def write_xlsx(report: TaxReport, path: str | Path) -> None:
-    """Write summary, values, and warnings sheets to an XLSX file."""
+    """Write summary, paste-ready form values, provenance, and warnings."""
 
     workbook = Workbook()
     summary = workbook.active
     summary.title = "Summary"
     summary.append(["Form 270.01 input", "Amount", "Source rule line"])
+    summary.append(["Status", report.status, "Human approval required"])
     summary_rows = [
         ("Taxable dividends", report.taxable_dividends, report.rules.dividends_line),
         (
@@ -32,6 +33,43 @@ def write_xlsx(report: TaxReport, path: str | Path) -> None:
     ]
     for row in summary_rows:
         summary.append(row)
+
+    paste = workbook.create_sheet("Copy into Form 270.01")
+    paste.append(["Form label", "KZT amount", "Rule line", "Notes"])
+    paste_rows = [
+        (
+            report.rules.form_labels.get("dividends", "Foreign dividends gross"),
+            report.taxable_dividends,
+            report.rules.dividends_line,
+            "Gross income before foreign withholding",
+        ),
+        (
+            report.rules.form_labels.get("realized_gains", "Foreign realized gains"),
+            report.taxable_realized_gains,
+            report.rules.realized_gains_line,
+            "Taxable disposals only",
+        ),
+        (
+            report.rules.form_labels.get("exempt_gains", "Exempt Freedom gains"),
+            report.exempt_realized_gains,
+            report.rules.exempt_gains_line,
+            "Reported and adjusted under configured exemption",
+        ),
+        (
+            "Foreign tax credit",
+            report.foreign_tax_credit,
+            "calculation",
+            "Capped at Kazakhstan tax on corresponding income",
+        ),
+        (
+            "IPN payable",
+            report.tax_due,
+            "calculation",
+            f"{report.status}; verify rules before filing",
+        ),
+    ]
+    for row in paste_rows:
+        paste.append(row)
 
     values = workbook.create_sheet("Values")
     values.append(["Category", "Amount", "Source file", "Source row", "Detail"])
@@ -59,7 +97,19 @@ def write_markdown(report: TaxReport, path: str | Path) -> None:
     lines = [
         f"# Form 270.01 inputs for {report.year}",
         "",
+        f"STATUS: {report.status}",
+        "",
         f"Rules citation: {report.rules.citation}",
+        "",
+        "## Copy into Form 270.01",
+        "",
+        "| Form label | KZT amount | Rule line | Notes |",
+        "| --- | ---: | --- | --- |",
+        f"| {report.rules.form_labels.get('dividends', 'Foreign dividends gross')} | {report.taxable_dividends} | {report.rules.dividends_line} | Gross income before foreign withholding |",
+        f"| {report.rules.form_labels.get('realized_gains', 'Foreign realized gains')} | {report.taxable_realized_gains} | {report.rules.realized_gains_line} | Taxable disposals only |",
+        f"| {report.rules.form_labels.get('exempt_gains', 'Exempt Freedom gains')} | {report.exempt_realized_gains} | {report.rules.exempt_gains_line} | Reported and adjusted under configured exemption |",
+        f"| Foreign tax credit | {report.foreign_tax_credit} | calculation | Capped at Kazakhstan tax on corresponding income |",
+        f"| IPN payable | {report.tax_due} | calculation | {report.status}; verify rules before filing |",
         "",
         "| Input | Amount | Rule line |",
         "| --- | ---: | --- |",

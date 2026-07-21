@@ -5,7 +5,7 @@ description = "Local-first calculator for Kazakhstan investment tax declaration 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "nicegui>=2.24.0",
+    "nicegui==3.14.0",
     "openpyxl>=3.1.5",
     "pandas>=3.0.3",
     "pdfplumber>=0.11.10",

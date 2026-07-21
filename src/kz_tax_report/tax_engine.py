@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from datetime import date
 
 import pandas as pd
 import yaml
@@ -28,6 +29,11 @@ class TaxRules:
     dividends_line: str
     realized_gains_line: str
     exempt_gains_line: str
+    form_labels: dict[str, str]
+    exemptions: tuple[str, ...]
+    conversion_policy: str
+    approved: bool
+    brackets: tuple[tuple[Decimal, Decimal], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,11 @@ class TraceableValue:
     source_file: str
     source_row: int
     source_detail: str = ""
+    currency: str = ""
+    rate_date: str = ""
+    fx_rate: Decimal | None = None
+    foreign_amount: Decimal | None = None
+    kzt_amount: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -52,8 +63,12 @@ class TaxReport:
     values: tuple[TraceableValue, ...]
     warnings: tuple[str, ...]
 
+    @property
+    def status(self) -> str:
+        return "FINAL" if self.rules.approved else "DRAFT"
 
-def load_rules(path: str | Path) -> TaxRules:
+
+def load_rules(path: str | Path, *, require_approved: bool = True) -> TaxRules:
     """Load and validate an approved, complete year-specific YAML rules file."""
 
     source_path = Path(path)
@@ -63,12 +78,28 @@ def load_rules(path: str | Path) -> TaxRules:
         raise RulesError(f"Unable to read tax rules: {source_path}: {error}") from error
     if not isinstance(raw, dict):
         raise RulesError("Tax rules must be a YAML mapping")
-    if raw.get("approved") is not True:
+    approved = raw.get("approved") is True
+    if require_approved and not approved:
         raise RulesError("Tax rules must be explicitly approved before calculation")
 
     try:
         tax = raw["tax"]
         income = raw["income"]
+        form_labels = raw.get("form_labels", {})
+        if not isinstance(form_labels, dict):
+            raise ValueError("form_labels must be a mapping")
+        exemptions = raw.get("exemptions", [])
+        if not isinstance(exemptions, list) or not all(
+            isinstance(item, str) and item.strip() for item in exemptions
+        ):
+            raise ValueError("exemptions must be a list of non-empty strings")
+        brackets = tuple(
+            (
+                _decimal(item["up_to"], "tax.brackets.up_to"),
+                _decimal(item["rate"], "tax.brackets.rate"),
+            )
+            for item in tax.get("brackets", [])
+        )
         rules = TaxRules(
             year=int(raw["year"]),
             citation=_required_text(raw, "citation"),
@@ -77,6 +108,15 @@ def load_rules(path: str | Path) -> TaxRules:
             dividends_line=_required_text(income, "dividends_line"),
             realized_gains_line=_required_text(income, "realized_gains_line"),
             exempt_gains_line=_required_text(income, "exempt_gains_line"),
+            form_labels={
+                str(key): _required_text(form_labels, str(key)) for key in form_labels
+            },
+            exemptions=tuple(exemptions),
+            conversion_policy=str(
+                raw.get("conversion_policy", "NBK rate on income date")
+            ),
+            approved=approved,
+            brackets=brackets,
         )
     except (KeyError, TypeError, ValueError, InvalidOperation) as error:
         raise RulesError(f"Tax rules are incomplete: {error}") from error
@@ -92,6 +132,7 @@ def calculate_report(
     ibkr_sections: dict[str, pd.DataFrame],
     freedom_transactions: pd.DataFrame,
     f1042s_records: pd.DataFrame,
+    rate_provider: Any | None = None,
 ) -> TaxReport:
     """Calculate tax inputs while retaining a source reference for every value."""
 
@@ -100,11 +141,17 @@ def calculate_report(
             f"Rules year {rules.year} does not match requested year {year}"
         )
 
-    dividends = extract_dividends(ibkr_sections)
-    withholding = extract_withholding_tax(ibkr_sections)
+    dividends = _filter_year(extract_dividends(ibkr_sections), year)
+    withholding = _filter_year(extract_withholding_tax(ibkr_sections), year)
     realized = extract_realized_pnl(ibkr_sections)
+    freedom_transactions = _filter_year(freedom_transactions, year)
+    f1042s_records = _filter_year(f1042s_records, year, column="tax_year")
     values: list[TraceableValue] = []
-    for row in dividends.to_dict("records"):
+    source_dividend_total = _sum(dividends, "amount")
+    source_withholding_total = _sum(withholding, "amount")
+    dividend_rows = _convert_rows(dividends, "amount", rate_provider)
+    withholding_rows = _convert_rows(withholding, "amount", rate_provider)
+    for row in dividend_rows.to_dict("records"):
         values.append(_trace("dividend", row["amount"], row))
     for row in realized.to_dict("records"):
         values.append(_trace("realized_gain", row["realized_total"], row))
@@ -114,29 +161,38 @@ def calculate_report(
             _trace("1042s_federal_tax_withheld", row["federal_tax_withheld"], row)
         )
 
-    taxable_dividends = _sum(dividends, "amount")
+    taxable_dividends = _sum(dividend_rows, "amount")
     taxable_realized_gains = _sum(realized, "realized_total")
+    exempt_sales = freedom_transactions[
+        freedom_transactions["transaction_type"].map(_is_sale)
+    ]
     exempt_realized_gains = _sum(
-        freedom_transactions[freedom_transactions["transaction_type"].map(_is_sale)],
+        _convert_rows(exempt_sales, "profit", rate_provider),
         "profit",
     )
-    for row in freedom_transactions[
-        freedom_transactions["transaction_type"].map(_is_sale)
-    ].to_dict("records"):
+    for row in _convert_rows(exempt_sales, "profit", rate_provider).to_dict("records"):
         values.append(_trace("exempt_gain", row["profit"], row))
 
     dividend_f1042s = _dividend_1042s_records(f1042s_records)
     f1042s_gross = _sum(dividend_f1042s, "gross_income")
-    withheld = abs(_sum(dividend_f1042s, "federal_tax_withheld"))
+    withheld_source = (
+        withholding_rows
+        if rate_provider is not None and not withholding_rows.empty
+        else dividend_f1042s
+    )
+    withheld_column = (
+        "amount" if withheld_source is withholding_rows else "federal_tax_withheld"
+    )
+    withheld = abs(_sum(withheld_source, withheld_column))
     warnings = _reconciliation_warnings(
-        taxable_dividends,
-        abs(_sum(withholding, "amount")),
+        source_dividend_total,
+        abs(source_withholding_total),
         f1042s_gross,
         withheld,
     )
     warnings.extend(_non_dividend_1042s_warnings(f1042s_records))
     tax_before_credit = _money(
-        (taxable_dividends + taxable_realized_gains) * rules.rate
+        _tax_for_base(taxable_dividends + taxable_realized_gains, rules)
     )
     foreign_tax_credit = _money(
         min(withheld, tax_before_credit) if rules.foreign_tax_credit else Decimal("0")
@@ -151,7 +207,16 @@ def calculate_report(
         foreign_tax_credit=foreign_tax_credit,
         tax_due=_money(max(Decimal("0"), tax_before_credit - foreign_tax_credit)),
         values=tuple(values),
-        warnings=tuple(warnings),
+        warnings=tuple(
+            warnings
+            + (
+                []
+                if rules.approved
+                else [
+                    "Tax rules are not approved; this report is DRAFT and must not be filed."
+                ]
+            )
+        ),
     )
 
 
@@ -173,6 +238,63 @@ def _money(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"))
 
 
+def _filter_year(frame: pd.DataFrame, year: int, column: str = "date") -> pd.DataFrame:
+    if frame.empty or column not in frame:
+        return frame
+
+    def matches(value: object) -> bool:
+        try:
+            return date.fromisoformat(str(value)[:10]).year == year
+        except ValueError:
+            return False
+
+    return frame[frame[column].map(matches)].reset_index(drop=True)
+
+
+def _convert_rows(
+    frame: pd.DataFrame, amount_column: str, provider: Any | None
+) -> pd.DataFrame:
+    if provider is None or frame.empty:
+        return frame
+    result = frame.copy()
+    converted: list[Decimal] = []
+    for index, row in enumerate(result.to_dict("records")):
+        currency = str(row.get("currency", "USD") or "USD").upper()
+        if currency == "KZT":
+            converted.append(_decimal(row[amount_column], amount_column))
+            continue
+        raw_date = (
+            row.get("date") or row.get("payment_date") or row.get("disposal_date")
+        )
+        if not raw_date:
+            raise RulesError(f"Missing conversion date for {amount_column}")
+        rate = provider.get_rate(str(raw_date)[:10], currency)
+        original = _decimal(row[amount_column], amount_column)
+        converted.append(original * _decimal(rate, "FX rate"))
+        result.loc[index, "original_amount"] = original
+        result.loc[index, "rate_date"] = str(raw_date)[:10]
+        result.loc[index, "fx_rate"] = rate
+    result[amount_column] = converted
+    return result
+
+
+def _tax_for_base(base: Decimal, rules: TaxRules) -> Decimal:
+    if not rules.brackets:
+        return base * rules.rate
+    total = Decimal("0")
+    lower = Decimal("0")
+    for upper, rate in rules.brackets:
+        portion = min(base, upper) - lower
+        if portion > 0:
+            total += portion * rate
+        lower = upper
+        if base <= upper:
+            return total
+    if base > lower:
+        total += (base - lower) * rules.brackets[-1][1]
+    return total
+
+
 def _sum(frame: pd.DataFrame, column: str) -> Decimal:
     if frame.empty:
         return Decimal("0")
@@ -187,6 +309,15 @@ def _trace(category: str, amount: object, row: dict[str, Any]) -> TraceableValue
         source_file=str(row["source_file"]),
         source_row=int(row["source_row"]),
         source_detail=detail,
+        currency=str(row.get("currency", "KZT") or "KZT"),
+        rate_date=str(row.get("rate_date", "")),
+        fx_rate=row.get("fx_rate"),
+        foreign_amount=(
+            _money(_decimal(row["original_amount"], category))
+            if "original_amount" in row
+            else None
+        ),
+        kzt_amount=_money(_decimal(amount, category)),
     )
 
 
