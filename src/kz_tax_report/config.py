@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 DEFAULT_NBK_URL = "https://nationalbank.kz/rss/get_rates.cfm"
@@ -31,6 +32,47 @@ ALLOWED_SOURCE_HOSTS = {
     "treaty_credit": {"oecd.org", "www.oecd.org"},
     "aix_exemption": {"aix.kz", "www.aix.kz"},
 }
+
+
+def get_app_mode() -> str:
+    mode = _env_value("KZ_TAX_REPORT_MODE", DEFAULT_ARTIFACT_MODE).lower()
+    if mode not in {"local", "hosted"}:
+        raise ValueError("KZ_TAX_REPORT_MODE must be local or hosted")
+    return mode
+
+
+def get_hosted_configuration() -> dict[str, str | float | int]:
+    """Return required hosted settings, failing closed when any are missing."""
+
+    if get_app_mode() != "hosted":
+        return {}
+    required = {
+        "issuer": "KZ_TAX_REPORT_ACCESS_ISSUER",
+        "audience": "KZ_TAX_REPORT_ACCESS_AUDIENCE",
+        "jwks_url": "KZ_TAX_REPORT_ACCESS_JWKS_URL",
+        "session_secret": "KZ_TAX_REPORT_SESSION_SECRET",
+        "public_url": "KZ_TAX_REPORT_PUBLIC_URL",
+    }
+    values = {key: os.environ.get(name, "").strip() for key, name in required.items()}
+    missing = [name for key, name in required.items() if not values[key]]
+    if missing:
+        raise ValueError("Hosted mode requires: " + ", ".join(missing))
+    for key in ("issuer", "jwks_url", "public_url"):
+        parsed = urlparse(values[key])
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError(f"Hosted {key} must be an HTTPS URL")
+    if len(values["session_secret"].encode()) < 32:
+        raise ValueError("KZ_TAX_REPORT_SESSION_SECRET must be at least 32 bytes")
+    if os.environ.get("KZ_TAX_REPORT_TRUST_PROXY", "").strip().lower() != "true":
+        raise ValueError("Hosted mode requires KZ_TAX_REPORT_TRUST_PROXY=true")
+    values["ttl_seconds"] = _required_positive_float(
+        "KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS"
+    )
+    values["max_upload_bytes"] = _required_positive_int(
+        "KZ_TAX_REPORT_MAX_UPLOAD_BYTES"
+    )
+    values["max_job_bytes"] = _required_positive_int("KZ_TAX_REPORT_MAX_JOB_BYTES")
+    return values
 
 
 def get_nbk_url() -> str:
@@ -90,8 +132,6 @@ def get_source_url(source_key: str) -> str:
     if source_key not in DEFAULT_SOURCE_URLS:
         raise ValueError(f"Unknown source key: {source_key}")
     value = _env_value(SOURCE_ENV_NAMES[source_key], DEFAULT_SOURCE_URLS[source_key])
-    from urllib.parse import urlparse
-
     parsed = urlparse(value)
     host = (parsed.hostname or "").lower().rstrip(".")
     if parsed.scheme != "https" or host not in ALLOWED_SOURCE_HOSTS[source_key]:
@@ -122,3 +162,29 @@ def _positive_int(name: str, fallback: int) -> int:
     if value <= 0:
         raise ValueError(f"{name} must be greater than zero")
     return value
+
+
+def _required_positive_float(name: str) -> float:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise ValueError(f"Hosted mode requires: {name}")
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise ValueError(f"{name} must be a number") from error
+    if parsed <= 0:
+        raise ValueError(f"{name} must be greater than zero")
+    return parsed
+
+
+def _required_positive_int(name: str) -> int:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise ValueError(f"Hosted mode requires: {name}")
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer") from error
+    if parsed <= 0:
+        raise ValueError(f"{name} must be greater than zero")
+    return parsed

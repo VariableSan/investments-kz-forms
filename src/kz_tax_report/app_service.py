@@ -9,11 +9,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from kz_tax_report.config import (
+    get_app_mode,
     get_artifact_mode,
     get_artifact_root,
     get_artifact_ttl_seconds,
     get_max_job_bytes,
     get_max_upload_bytes,
+    get_hosted_configuration,
     get_rules_path,
 )
 from kz_tax_report.f1042s_parser import parse_f1042s
@@ -48,12 +50,16 @@ class ArtifactPolicy:
 
     @classmethod
     def from_environment(cls) -> "ArtifactPolicy":
+        app_mode = get_app_mode()
+        hosted = get_hosted_configuration()
         return cls(
             root=get_artifact_root(),
-            mode=get_artifact_mode(),
-            ttl_seconds=get_artifact_ttl_seconds(),
-            max_upload_bytes=get_max_upload_bytes(),
-            max_job_bytes=get_max_job_bytes(),
+            mode=app_mode if app_mode == "hosted" else get_artifact_mode(),
+            ttl_seconds=float(hosted.get("ttl_seconds", get_artifact_ttl_seconds())),
+            max_upload_bytes=int(
+                hosted.get("max_upload_bytes", get_max_upload_bytes())
+            ),
+            max_job_bytes=int(hosted.get("max_job_bytes", get_max_job_bytes())),
         )
 
 
@@ -76,6 +82,7 @@ class ArtifactJobManager:
         self.cleanup_expired()
 
     def create(self, owner: str) -> ArtifactJob:
+        self.cleanup_expired()
         for _ in range(5):
             job_id = uuid4().hex
             root = self.policy.root / job_id
@@ -96,6 +103,7 @@ class ArtifactJobManager:
         raise OSError("Unable to allocate an artifact workspace")
 
     def get(self, job_id: str, owner: str) -> ArtifactJob:
+        self.cleanup_expired()
         if not job_id or Path(job_id).name != job_id:
             raise InputValidationError("Invalid artifact job id")
         metadata_path = self.policy.root / job_id / "metadata.json"
@@ -117,6 +125,20 @@ class ArtifactJobManager:
             workspace,
             metadata_path,
         )
+
+    def get_for_download(self, job_id: str, owner: str | None) -> ArtifactJob:
+        """Resolve a download and enforce ownership in hosted mode."""
+
+        if self.policy.mode == "hosted":
+            if not owner:
+                raise InputValidationError("Artifact ownership is required")
+            return self.get(job_id, owner)
+        metadata_path = self.policy.root / job_id / "metadata.json"
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError) as error:
+            raise InputValidationError("Artifact job not found") from error
+        return self.get(job_id, str(metadata.get("owner", "")))
 
     def cleanup_expired(self, now: float | None = None) -> tuple[str, ...]:
         cutoff = (time.time() if now is None else now) - self.policy.ttl_seconds

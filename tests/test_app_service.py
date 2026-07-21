@@ -95,6 +95,17 @@ def test_artifact_jobs_expire_without_touching_other_jobs(tmp_path: Path) -> Non
     assert new_job.workspace.root.exists()
 
 
+def test_expired_artifact_is_reaped_before_lookup(tmp_path: Path) -> None:
+    manager = ArtifactJobManager(
+        ArtifactPolicy(root=tmp_path / "jobs", mode="hosted", ttl_seconds=10)
+    )
+    job = manager.create("owner")
+    manager.set_created_at(job, 100.0)
+
+    with pytest.raises(InputValidationError, match="not found"):
+        manager.get(job.job_id, "owner")
+
+
 def test_workspace_enforces_per_file_and_total_upload_limits(tmp_path: Path) -> None:
     workspace = CalculationWorkspace(
         tmp_path / "session", max_upload_bytes=4, max_job_bytes=6

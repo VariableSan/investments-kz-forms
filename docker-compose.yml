@@ -33,7 +33,7 @@ services:
     command: ["/app/.venv/bin/kz-tax-report-ui"]
     healthcheck:
       test:
-        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=2)"]
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -44,19 +44,30 @@ services:
       context: .
     image: kz-tax-report:local
     ports:
-      - "${KZ_TAX_REPORT_UI_PORT:-8080}:8080"
+      - "127.0.0.1:${KZ_TAX_REPORT_UI_PORT:-8080}:8080"
+    tmpfs:
+      - /tmp/kz-tax-report-jobs:mode=700
     environment:
       KZ_TAX_REPORT_UI_HOST: 0.0.0.0
       KZ_TAX_REPORT_UI_PORT: 8080
+      KZ_TAX_REPORT_MODE: hosted
       KZ_TAX_REPORT_ARTIFACT_MODE: hosted
       KZ_TAX_REPORT_ARTIFACT_DIR: /tmp/kz-tax-report-jobs
-      KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS: ${KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS:-3600}
+      KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS: ${KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS:-}
+      KZ_TAX_REPORT_MAX_UPLOAD_BYTES: ${KZ_TAX_REPORT_MAX_UPLOAD_BYTES:-}
+      KZ_TAX_REPORT_MAX_JOB_BYTES: ${KZ_TAX_REPORT_MAX_JOB_BYTES:-}
+      KZ_TAX_REPORT_ACCESS_ISSUER: ${KZ_TAX_REPORT_ACCESS_ISSUER:-}
+      KZ_TAX_REPORT_ACCESS_AUDIENCE: ${KZ_TAX_REPORT_ACCESS_AUDIENCE:-}
+      KZ_TAX_REPORT_ACCESS_JWKS_URL: ${KZ_TAX_REPORT_ACCESS_JWKS_URL:-}
+      KZ_TAX_REPORT_SESSION_SECRET: ${KZ_TAX_REPORT_SESSION_SECRET:-}
+      KZ_TAX_REPORT_PUBLIC_URL: ${KZ_TAX_REPORT_PUBLIC_URL:-}
+      KZ_TAX_REPORT_TRUST_PROXY: ${KZ_TAX_REPORT_TRUST_PROXY:-}
       KZ_TAX_REPORT_RULES_DIR: ${KZ_TAX_REPORT_RULES_DIR:-}
     working_dir: /app
     command: ["/app/.venv/bin/kz-tax-report-ui"]
     healthcheck:
       test:
-        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=2)"]
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
       interval: 30s
       timeout: 5s
       retries: 3

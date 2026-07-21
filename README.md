@@ -123,10 +123,35 @@ make docker-web
 The `hosted` Compose profile intentionally has no host output mount. It streams
 browser downloads from TTL-managed job directories and removes expired jobs;
 it does not publish a static report directory. Start it with
-`docker compose --profile hosted up web-hosted`. The local profile uses a
-default 24-hour TTL, while the hosted profile defaults to one hour. Both
-profiles enforce per-file and per-job upload limits. Compose health checks
-probe the UI root endpoint every 30 seconds.
+`docker compose --profile hosted up web-hosted` after setting every hosted
+variable in `.env`. The origin binds only to loopback so Cloudflare Tunnel (or
+an equivalent private reverse proxy) remains the only public ingress. Compose
+health checks probe `/healthz` every 30 seconds; the application root itself
+requires a valid Cloudflare Access token.
+
+### Invite-Only Hosted Profile
+
+Set `KZ_TAX_REPORT_MODE=hosted`, the Access issuer, audience, JWKS URL,
+HTTPS public URL, a random session secret of at least 32 bytes,
+`KZ_TAX_REPORT_TRUST_PROXY=true`, and explicit positive TTL/upload limits. The
+process refuses to start when any of these values is missing or insecure.
+Cloudflare Access must enforce the invite-only email policy and pass its
+signed `CF_Authorization` cookie; the application also accepts a Bearer token
+for API-style clients. Unsigned identity headers and application passwords are
+not trusted.
+
+Deploy the image pulled from GHCR through Dokploy, attach a Cloudflare Tunnel
+to the private container port, and keep the origin firewall closed. Store the
+issuer, audience, JWKS URL, public URL, session secret, and limits as Dokploy
+secrets/environment values, never in the image. Use the health check at
+`/healthz`. Jobs and reports are isolated by authenticated subject, deleted by
+TTL cleanup, and are not persisted to a host output mount. Initial delivery
+does not use R2: reports are streamed directly from the ephemeral job
+directory, which keeps the retention and authorization surface small.
+
+The server necessarily sees plaintext PDF and CSV contents while parsing. This
+is an intentional hosted risk, not a zero-knowledge design; only invited
+identities should be allowed through Access.
 
 ## Browser UI
 

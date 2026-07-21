@@ -4,7 +4,10 @@ import json
 import os
 from uuid import uuid4
 
+from fastapi import HTTPException
+from fastapi.responses import FileResponse, JSONResponse
 from nicegui import events, ui
+from nicegui import app
 
 from kz_tax_report.app_service import (
     ArtifactJobManager,
@@ -13,15 +16,52 @@ from kz_tax_report.app_service import (
     export_artifacts,
 )
 from kz_tax_report.config import get_rules_path
+from kz_tax_report.config import get_app_mode, get_hosted_configuration
+from kz_tax_report.hosted_security import (
+    get_authenticated_subject,
+    install_hosted_security,
+)
 from kz_tax_report.rules_workspace import RulesDraftError, TaxRulesDraft
 from kz_tax_report.source_evidence import fetch_source_evidence
 from kz_tax_report.tax_engine import RulesError
 
 
+_artifact_manager: ArtifactJobManager | None = None
+
+
+def _get_artifact_manager() -> ArtifactJobManager:
+    global _artifact_manager
+    if _artifact_manager is None:
+        _artifact_manager = ArtifactJobManager(ArtifactPolicy.from_environment())
+    return _artifact_manager
+
+
+@app.get("/healthz")
+async def healthz() -> JSONResponse:
+    return JSONResponse({"status": "ok"})
+
+
+@app.get("/artifacts/{job_id}/{filename}")
+async def download_artifact(job_id: str, filename: str) -> FileResponse:
+    if filename not in {"form-270-report.xlsx", "form-270-report.md"}:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    try:
+        job = _get_artifact_manager().get_for_download(
+            job_id, get_authenticated_subject()
+        )
+    except InputValidationError as error:
+        raise HTTPException(status_code=404, detail="Artifact not found") from error
+    artifact = job.workspace.root / filename
+    if not artifact.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return FileResponse(artifact, filename=filename)
+
+
 @ui.page("/")
 def index() -> None:
-    artifact_manager = ArtifactJobManager(ArtifactPolicy.from_environment())
-    job = artifact_manager.create(uuid4().hex)
+    artifact_manager = _get_artifact_manager()
+    owner = get_authenticated_subject() or uuid4().hex
+    job = artifact_manager.create(owner)
     workspace = job.workspace
     state: dict[str, object] = {"artifacts": None}
 
@@ -294,12 +334,16 @@ def index() -> None:
                     ui.button(
                         "Download XLSX",
                         icon="download",
-                        on_click=lambda: ui.download(str(artifacts.xlsx_path)),
+                        on_click=lambda: ui.download(
+                            f"/artifacts/{job.job_id}/form-270-report.xlsx"
+                        ),
                     )
                     ui.button(
                         "Download Markdown",
                         icon="description",
-                        on_click=lambda: ui.download(str(artifacts.markdown_path)),
+                        on_click=lambda: ui.download(
+                            f"/artifacts/{job.job_id}/form-270-report.md"
+                        ),
                     )
 
         ui.button("Calculate report", icon="calculate", on_click=calculate).classes(
@@ -316,11 +360,19 @@ def _evidence_summary(evidence: object) -> str:
 
 
 def main() -> None:
+    mode = get_app_mode()
+    run_options: dict[str, object] = {
+        "host": os.environ.get("KZ_TAX_REPORT_UI_HOST", "127.0.0.1"),
+        "port": int(os.environ.get("KZ_TAX_REPORT_UI_PORT", "8080")),
+        "title": "KZ tax report",
+        "reload": False,
+    }
+    if mode == "hosted":
+        settings = get_hosted_configuration()
+        install_hosted_security(app)
+        run_options["storage_secret"] = str(settings["session_secret"])
     ui.run(
-        host=os.environ.get("KZ_TAX_REPORT_UI_HOST", "127.0.0.1"),
-        port=int(os.environ.get("KZ_TAX_REPORT_UI_PORT", "8080")),
-        title="KZ tax report",
-        reload=False,
+        **run_options,
     )
 
 
