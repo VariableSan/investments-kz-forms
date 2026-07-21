@@ -15,8 +15,12 @@ from kz_tax_report.app_service import (
     InputValidationError,
     export_artifacts,
 )
-from kz_tax_report.config import get_rules_path
-from kz_tax_report.config import get_app_mode, get_hosted_configuration
+from kz_tax_report.config import (
+    get_app_mode,
+    get_hosted_configuration,
+    get_rules_path,
+    get_source_url,
+)
 from kz_tax_report.hosted_security import (
     get_authenticated_subject,
     install_hosted_security,
@@ -82,6 +86,52 @@ def index() -> None:
         ui.label(
             "Upload the three source reports, calculate locally, and inspect every warning before downloading."
         ).classes("text-lg")
+        with ui.card().classes("w-full bg-white border border-stone-200"):
+            ui.label("Official sources for the fields below").classes(
+                "text-xl font-bold"
+            )
+            ui.label(
+                "Use the current year and applicable language/version. The links are checked against the application's HTTPS allowlist."
+            ).classes("text-sm text-gray-600")
+            source_link_specs = (
+                (
+                    "Tax Code",
+                    "Tax rate, foreign tax credit and exemption rules",
+                    "tax_code",
+                ),
+                (
+                    "Tax forms",
+                    "Form 270.01 line numbers and reporting instructions",
+                    "form_instructions",
+                ),
+                (
+                    "MRP",
+                    "The annual MRP value used in the calculation",
+                    "mrp",
+                ),
+                (
+                    "National Bank rates",
+                    "NBK FX-rate reference for payment or disposal dates",
+                    "nbk_rates",
+                ),
+                (
+                    "Treaty guidance",
+                    "Foreign-tax-credit and treaty background",
+                    "treaty_credit",
+                ),
+                (
+                    "AIX official list",
+                    "Check whether an instrument is listed and potentially exempt",
+                    "aix_exemption",
+                ),
+            )
+            with ui.column().classes("w-full gap-2"):
+                for label, purpose, source_key in source_link_specs:
+                    with ui.row().classes("w-full items-baseline gap-2 flex-wrap"):
+                        ui.link(
+                            label, get_source_url(source_key), new_tab=True
+                        ).classes("text-teal-800 font-bold underline")
+                        ui.label(f"- {purpose}").classes("text-sm text-gray-700")
         with ui.card().classes("w-full bg-amber-50 border border-amber-200"):
             ui.label(
                 "Privacy boundary: this browser service has no built-in authentication. "

@@ -14,12 +14,12 @@ DEFAULT_ARTIFACT_TTL_SECONDS = 86400.0
 DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 DEFAULT_MAX_JOB_BYTES = 75 * 1024 * 1024
 DEFAULT_SOURCE_URLS = {
-    "tax_code": "https://adilet.zan.kz/eng/docs/K1700000121",
-    "form_instructions": "https://kgd.gov.kz/en/content/forms-tax-reporting",
+    "tax_code": "https://adilet.zan.kz/eng/docs/K2500000214",
+    "form_instructions": "https://kgd.gov.kz/en/section/formy-nalogovoy-otchetnosti",
     "mrp": "https://gov.kz/memleket/entities/enbek?lang=en",
-    "nbk_rates": DEFAULT_NBK_URL,
+    "nbk_rates": "https://nationalbank.kz/ru",
     "treaty_credit": "https://www.oecd.org/tax/treaties/",
-    "aix_exemption": "https://aix.kz/listing/",
+    "aix_exemption": "https://market.aixkz.com/official-list",
 }
 SOURCE_ENV_NAMES = {
     key: f"KZ_TAX_REPORT_SOURCE_{key.upper()}_URL" for key in DEFAULT_SOURCE_URLS
@@ -30,7 +30,7 @@ ALLOWED_SOURCE_HOSTS = {
     "mrp": {"gov.kz"},
     "nbk_rates": {"nationalbank.kz"},
     "treaty_credit": {"oecd.org", "www.oecd.org"},
-    "aix_exemption": {"aix.kz", "www.aix.kz"},
+    "aix_exemption": {"aix.kz", "www.aix.kz", "market.aixkz.com"},
 }
 
 

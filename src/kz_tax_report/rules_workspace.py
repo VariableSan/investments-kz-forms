@@ -104,7 +104,12 @@ class TaxRulesDraft:
         source_key = str(evidence.get("source_key", "")).strip()
         if not source_key:
             raise RulesDraftError("Source evidence needs a source key")
-        self._mapping("source_evidence")[source_key] = deepcopy(evidence)
+        source_evidence = self.document.setdefault("source_evidence", {})
+        if not isinstance(source_evidence, dict):
+            raise RulesDraftError(
+                "Tax rules section must be a mapping: source_evidence"
+            )
+        source_evidence[source_key] = deepcopy(evidence)
 
     def materialize(self, directory: str | Path) -> Path:
         """Write this draft to an isolated directory and return its path."""
