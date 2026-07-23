@@ -108,7 +108,7 @@ income:
     assert any("1042-S gross income" in warning for warning in result.warnings)
 
 
-def test_reconciliation_uses_only_dividend_1042s_and_normalizes_withholding_sign(
+def test_reconciliation_uses_total_1042s_income_and_normalizes_withholding_sign(
     tmp_path: Path,
 ) -> None:
     rules_path = tmp_path / "rules.yaml"
@@ -194,8 +194,100 @@ income:
     )
 
     assert result.foreign_tax_credit == Decimal("8")
-    assert not any("does not reconcile" in warning for warning in result.warnings)
+    assert any(
+        "gross income does not reconcile" in warning for warning in result.warnings
+    )
+    assert not any(
+        "federal tax withheld does not reconcile" in warning
+        for warning in result.warnings
+    )
     assert any("income code 01" in warning for warning in result.warnings)
+
+
+def test_reconciliation_ignores_sub_dollar_gross_rounding_difference(
+    tmp_path: Path,
+) -> None:
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(
+        """
+year: 2025
+approved: true
+citation: Synthetic approved rule for tests
+tax:
+  rate: '0.10'
+  foreign_tax_credit: true
+income:
+  dividends_line: '270.01.01'
+  realized_gains_line: '270.01.02'
+  exempt_gains_line: '270.01.03'
+""",
+        encoding="utf-8",
+    )
+    records = pd.DataFrame(
+        [
+            {
+                "income_code": "06",
+                "gross_income": Decimal("306"),
+                "federal_tax_withheld": Decimal("46"),
+                "source_file": "1042-s.pdf",
+                "source_page": 1,
+                "source_row": 3,
+            },
+            {
+                "income_code": "01",
+                "gross_income": Decimal("180"),
+                "federal_tax_withheld": Decimal("0"),
+                "source_file": "1042-s.pdf",
+                "source_page": 4,
+                "source_row": 3,
+            },
+        ]
+    )
+    report = calculate_report(
+        year=2025,
+        rules=load_rules(rules_path, require_approved=False),
+        ibkr_sections={
+            "Дивиденды": pd.DataFrame(
+                [
+                    {
+                        "currency": "USD",
+                        "date": "2025-02-01",
+                        "description": "dividend",
+                        "amount": 485.89,
+                        "source_file": "activity.csv",
+                        "source_row": 12,
+                    }
+                ]
+            ),
+            "Удерживаемый налог": pd.DataFrame(
+                [
+                    {
+                        "currency": "USD",
+                        "date": "2025-02-01",
+                        "description": "withholding",
+                        "amount": 46,
+                        "source_file": "activity.csv",
+                        "source_row": 13,
+                    }
+                ]
+            ),
+            "Реализованная и нереализованная П/У: отчет об эффективности": pd.DataFrame(
+                columns=[
+                    "Класс актива",
+                    "Символ",
+                    "Реализованная Всего",
+                    "source_file",
+                    "source_row",
+                ]
+            ),
+        },
+        freedom_transactions=pd.DataFrame(columns=["transaction_type", "profit"]),
+        f1042s_records=records,
+    )
+
+    assert not any(
+        "gross income does not reconcile" in warning for warning in report.warnings
+    )
 
 
 def test_unapproved_or_incomplete_rules_refuse_calculation(tmp_path: Path) -> None:

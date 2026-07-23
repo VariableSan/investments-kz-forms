@@ -1,6 +1,4 @@
 from decimal import Decimal
-from datetime import date
-import json
 from pathlib import Path
 
 import pytest
@@ -8,7 +6,6 @@ import pytest
 from kz_tax_report.f1042s_parser import parse_f1042s
 from kz_tax_report.fifo import FifoError, match_fifo
 from kz_tax_report.freedom_parser import parse_freedom_report
-from kz_tax_report.nbk_rates import NbkRateProvider
 
 
 class FakePage:
@@ -226,76 +223,3 @@ def test_fifo_rejects_sales_without_inventory() -> None:
             purchases=[],
             sales=[{"symbol": "ETN", "quantity": "1", "unit_price": "15"}],
         )
-
-
-class FakeResponse:
-    def __init__(self, content: bytes):
-        self.content = content
-
-    def raise_for_status(self) -> None:
-        return None
-
-
-class FakeSession:
-    def __init__(self, response: FakeResponse | Exception):
-        self.response = response
-        self.calls: list[dict[str, object]] = []
-
-    def get(self, url: str, *, params: dict[str, str], timeout: float) -> FakeResponse:
-        self.calls.append({"url": url, "params": params, "timeout": timeout})
-        if isinstance(self.response, Exception):
-            raise self.response
-        return self.response
-
-
-def test_nbk_rate_provider_uses_environment_defaults(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("KZ_TAX_REPORT_NBK_URL", "https://env.example/rates")
-    monkeypatch.setenv("KZ_TAX_REPORT_NBK_TIMEOUT", "3.5")
-
-    provider = NbkRateProvider(
-        tmp_path / "nbk-rates.json", session=FakeSession(OSError())
-    )
-
-    assert provider.url == "https://env.example/rates"
-    assert provider.timeout == 3.5
-
-
-def test_nbk_rate_provider_caches_xml_and_uses_cached_fallback(tmp_path: Path) -> None:
-    cache_path = tmp_path / "nbk-rates.json"
-    response = FakeResponse(
-        b"<rates><item><title>USD</title><description>500.25</description></item></rates>"
-    )
-    online = FakeSession(response)
-    provider = NbkRateProvider(
-        cache_path, url="https://example.test/rates", session=online
-    )
-
-    assert provider.get_rate(date(2025, 2, 1), "USD") == Decimal("500.25")
-    assert online.calls[0]["params"] == {"fdate": "01.02.2025"}
-    assert json.loads(cache_path.read_text()) == {"2025-02-01": {"USD": "500.25"}}
-
-    offline = NbkRateProvider(
-        cache_path,
-        url="https://example.test/rates",
-        session=FakeSession(OSError("offline")),
-    )
-    assert offline.get_rate(date(2025, 2, 2), "USD") == Decimal("500.25")
-
-
-def test_nbk_rate_provider_uses_prior_cache_when_currency_is_absent(
-    tmp_path: Path,
-) -> None:
-    cache_path = tmp_path / "nbk-rates.json"
-    cache_path.write_text('{"2025-02-01": {"USD": "500.25"}}', encoding="utf-8")
-    holiday_response = FakeResponse(
-        b"<rates><item><title>EUR</title><description>520.10</description></item></rates>"
-    )
-    provider = NbkRateProvider(
-        cache_path,
-        url="https://example.test/rates",
-        session=FakeSession(holiday_response),
-    )
-
-    assert provider.get_rate(date(2025, 2, 2), "USD") == Decimal("500.25")

@@ -72,15 +72,60 @@ def write_xlsx(report: TaxReport, path: str | Path) -> None:
         paste.append(row)
 
     values = workbook.create_sheet("Values")
-    values.append(["Category", "Amount", "Source file", "Source row", "Detail"])
+    values.append(
+        [
+            "Category",
+            "Amount KZT",
+            "Foreign amount",
+            "Currency",
+            "Annual FX rate",
+            "FX source",
+            "Source file",
+            "Source row",
+            "Detail",
+        ]
+    )
     for value in report.values:
         values.append(
             [
                 value.category,
                 value.amount,
+                value.foreign_amount,
+                value.currency,
+                value.fx_rate,
+                value.fx_source,
                 value.source_file,
                 value.source_row,
                 value.source_detail,
+            ]
+        )
+
+    assets = workbook.create_sheet("Copy into Form 270.04")
+    assets.append(
+        [
+            "Asset class",
+            "Symbol",
+            "ISIN",
+            "Quantity",
+            "Country",
+            "Currency",
+            "Source file",
+            "Source row",
+            "Manual completion",
+        ]
+    )
+    for asset in report.assets:
+        assets.append(
+            [
+                asset.get("asset_class", ""),
+                asset.get("symbol", ""),
+                asset.get("isin", ""),
+                asset.get("quantity", ""),
+                asset.get("country", ""),
+                asset.get("currency", ""),
+                asset.get("source_file", ""),
+                asset.get("source_row", ""),
+                "ISIN and country require manual completion",
             ]
         )
 
@@ -122,12 +167,25 @@ def write_markdown(report: TaxReport, path: str | Path) -> None:
         "",
         "## Source values",
         "",
-        "| Category | Amount | Source |",
-        "| --- | ---: | --- |",
+        "| Category | Amount KZT | Foreign amount | Currency | Rate | Source |",
+        "| --- | ---: | ---: | --- | ---: | --- |",
     ]
     lines.extend(
-        f"| {value.category} | {value.amount} | {value.source_file}:{value.source_row} |"
+        f"| {value.category} | {value.amount} | {value.foreign_amount or ''} | {value.currency} | {value.fx_rate or ''} | {value.source_file}:{value.source_row} |"
         for value in report.values
+    )
+    lines.extend(
+        [
+            "",
+            "## Copy into Form 270.04",
+            "",
+            "| Asset class | Symbol | ISIN | Quantity | Country | Source |",
+            "| --- | --- | --- | ---: | --- | --- |",
+        ]
+    )
+    lines.extend(
+        f"| {asset.get('asset_class', '')} | {asset.get('symbol', '')} | {asset.get('isin', '')} | {asset.get('quantity', '')} | {asset.get('country', '')} | {asset.get('source_file', '')}:{asset.get('source_row', '')} |"
+        for asset in report.assets
     )
     lines.extend(["", "## Warnings", ""])
     lines.extend(f"- {warning}" for warning in report.warnings or ("None",))

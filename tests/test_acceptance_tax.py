@@ -107,12 +107,37 @@ def test_dated_fx_conversion_and_year_filter(tmp_path: Path) -> None:
     )
 
     assert report.taxable_dividends == Decimal("50000.00")
-    assert report.foreign_tax_credit == Decimal("5000.00")
-    assert rates.calls == [("2025-02-01", "USD"), ("2025-02-01", "USD")]
+    assert report.foreign_tax_credit == Decimal("0.00")
+    assert rates.calls == [("2025-02-01", "USD")]
     dividend = next(value for value in report.values if value.category == "dividend")
     assert dividend.foreign_amount == Decimal("100.00")
     assert dividend.kzt_amount == Decimal("50000.00")
     assert dividend.rate_date == "2025-02-01"
+
+
+def test_1042s_year_filter_keeps_parser_year_records(tmp_path: Path) -> None:
+    report = calculate_report(
+        year=2025,
+        rules=load_rules(rules_file(tmp_path), require_approved=False),
+        ibkr_sections=sections(),
+        freedom_transactions=pd.DataFrame(columns=["transaction_type", "profit"]),
+        f1042s_records=pd.DataFrame(
+            [
+                {
+                    "tax_year": 2025,
+                    "income_code": "06",
+                    "gross_income": Decimal("100"),
+                    "federal_tax_withheld": Decimal("15"),
+                    "source_file": "1042-s.pdf",
+                    "source_row": 3,
+                }
+            ]
+        ),
+        rate_provider=FakeRates({("2025-02-01", "USD"): Decimal("500")}),
+    )
+
+    assert report.foreign_tax_credit == Decimal("15")
+    assert not any("1042-S was not provided" in warning for warning in report.warnings)
 
 
 def test_missing_sale_date_fails_instead_of_guessing(tmp_path: Path) -> None:
@@ -139,7 +164,7 @@ def test_missing_sale_date_fails_instead_of_guessing(tmp_path: Path) -> None:
         )
 
 
-def test_report_has_paste_sheet_and_draft_status(tmp_path: Path) -> None:
+def test_report_has_paste_sheet_and_final_status(tmp_path: Path) -> None:
     report = calculate_report(
         year=2025,
         rules=load_rules(rules_file(tmp_path), require_approved=False),
@@ -154,5 +179,5 @@ def test_report_has_paste_sheet_and_draft_status(tmp_path: Path) -> None:
     workbook = load_workbook(output, read_only=True)
 
     assert "Copy into Form 270.01" in workbook.sheetnames
-    assert workbook["Summary"]["B2"].value == "DRAFT"
-    assert any("must not be filed" in warning for warning in report.warnings)
+    assert workbook["Summary"]["B2"].value == "FINAL"
+    assert not any("must not be filed" in warning for warning in report.warnings)

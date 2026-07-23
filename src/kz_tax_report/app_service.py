@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
+from kz_tax_report.annual_rates import AnnualRateProvider
 from kz_tax_report.config import (
     get_app_mode,
     get_artifact_mode,
@@ -22,7 +23,6 @@ from kz_tax_report.f1042s_parser import parse_f1042s
 from kz_tax_report.freedom_parser import parse_freedom_report
 from kz_tax_report.ibkr_parser import parse_activity_statement
 from kz_tax_report.report_builder import write_markdown, write_xlsx
-from kz_tax_report.nbk_rates import NbkRateProvider
 from kz_tax_report.tax_engine import TaxReport, calculate_report, load_rules
 
 
@@ -189,7 +189,8 @@ class CalculationArtifacts:
 class CalculationWorkspace:
     """Own uploaded inputs and generated reports for one isolated session."""
 
-    REQUIRED_INPUTS = ("activity.csv", "freedom.pdf", "f1042s.pdf")
+    REQUIRED_INPUTS = ("activity.csv", "freedom.pdf", "annual-rates.xlsx")
+    OPTIONAL_INPUTS = ("f1042s.pdf",)
 
     def __init__(
         self,
@@ -208,7 +209,7 @@ class CalculationWorkspace:
         """Save an upload under a known logical filename."""
 
         safe_name = Path(filename).name
-        if safe_name not in self.REQUIRED_INPUTS:
+        if safe_name not in (*self.REQUIRED_INPUTS, *self.OPTIONAL_INPUTS):
             raise InputValidationError(f"Unsupported upload: {filename}")
         if len(content) > self.max_upload_bytes:
             raise InputValidationError(
@@ -216,7 +217,10 @@ class CalculationWorkspace:
             )
         existing_size = sum(
             path.stat().st_size
-            for path in (self.root / name for name in self.REQUIRED_INPUTS)
+            for path in (
+                self.root / name
+                for name in (*self.REQUIRED_INPUTS, *self.OPTIONAL_INPUTS)
+            )
             if path.is_file() and path.name != safe_name
         )
         if existing_size + len(content) > self.max_job_bytes:
@@ -255,7 +259,12 @@ class CalculationWorkspace:
             year=year,
             ibkr_path=self.root / "activity.csv",
             freedom_path=self.root / "freedom.pdf",
-            f1042s_path=self.root / "f1042s.pdf",
+            annual_rates_path=self.root / "annual-rates.xlsx",
+            f1042s_path=(
+                self.root / "f1042s.pdf"
+                if (self.root / "f1042s.pdf").is_file()
+                else None
+            ),
             xlsx_path=self.root / "form-270-report.xlsx",
             markdown_path=self.root / "form-270-report.md",
             rules_path=rules_path,
@@ -314,21 +323,26 @@ def calculate_files(
     year: int,
     ibkr_path: str | Path,
     freedom_path: str | Path,
-    f1042s_path: str | Path,
+    annual_rates_path: str | Path,
+    f1042s_path: str | Path | None = None,
     xlsx_path: str | Path,
     markdown_path: str | Path,
     rules_path: str | Path | None = None,
-    rate_provider: NbkRateProvider | None = None,
+    rate_provider: AnnualRateProvider | None = None,
 ) -> TaxReport:
-    """Calculate and write a report from three source files."""
+    """Calculate and write a report from broker files and an annual-rate workbook."""
 
     report = calculate_report(
         year=year,
         rules=load_rules(rules_path or get_rules_path(year), require_approved=False),
         ibkr_sections=parse_activity_statement(ibkr_path),
         freedom_transactions=parse_freedom_report(freedom_path),
-        f1042s_records=parse_f1042s(f1042s_path),
-        rate_provider=rate_provider or NbkRateProvider(),
+        f1042s_records=(
+            parse_f1042s(f1042s_path)
+            if f1042s_path is not None and Path(f1042s_path).is_file()
+            else None
+        ),
+        rate_provider=rate_provider or AnnualRateProvider(annual_rates_path, year),
     )
     Path(xlsx_path).parent.mkdir(parents=True, exist_ok=True)
     write_xlsx(report, xlsx_path)

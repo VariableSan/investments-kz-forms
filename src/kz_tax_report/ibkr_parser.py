@@ -109,6 +109,37 @@ def extract_realized_pnl(sections: dict[str, pd.DataFrame]) -> pd.DataFrame:
     )[["asset_class", "symbol", "realized_total", "source_file", "source_row"]]
 
 
+def extract_open_positions(sections: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Return IBKR closing positions with fields useful for Form 270.04."""
+
+    frame = _require_section(sections, "Открытые позиции")
+    discriminator = _find_column(frame, "DataDiscriminator", "Тип данных")
+    asset_column = _find_column(frame, "Класс актива", "asset_class")
+    currency_column = _find_column(frame, "Валюта", "currency")
+    symbol_column = _find_column(frame, "Символ", "symbol")
+    quantity_column = _find_column(frame, "Количество", "quantity")
+    detail = frame[frame[discriminator].astype(str).str.casefold() == "summary"].copy()
+    detail["quantity"] = _to_number(detail[quantity_column], quantity_column)
+    return detail.assign(
+        asset_class=detail[asset_column],
+        currency=detail[currency_column],
+        symbol=detail[symbol_column],
+        isin="",
+        country="",
+    )[
+        [
+            "asset_class",
+            "currency",
+            "symbol",
+            "quantity",
+            "isin",
+            "country",
+            "source_file",
+            "source_row",
+        ]
+    ]
+
+
 def parse_dividend_report(path: str | Path) -> pd.DataFrame:
     """Parse the optional IBKR HTML dividend detail table."""
 

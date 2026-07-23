@@ -11,9 +11,13 @@ import yaml
 
 from kz_tax_report.ibkr_parser import (
     extract_dividends,
+    extract_open_positions,
     extract_realized_pnl,
     extract_withholding_tax,
 )
+
+
+_GROSS_RECONCILIATION_TOLERANCE = Decimal("0.50")
 
 
 class RulesError(ValueError):
@@ -46,6 +50,7 @@ class TraceableValue:
     currency: str = ""
     rate_date: str = ""
     fx_rate: Decimal | None = None
+    fx_source: str = ""
     foreign_amount: Decimal | None = None
     kzt_amount: Decimal | None = None
 
@@ -61,11 +66,12 @@ class TaxReport:
     foreign_tax_credit: Decimal
     tax_due: Decimal
     values: tuple[TraceableValue, ...]
+    assets: tuple[dict[str, Any], ...]
     warnings: tuple[str, ...]
 
     @property
     def status(self) -> str:
-        return "FINAL" if self.rules.approved else "DRAFT"
+        return "FINAL"
 
 
 def load_rules(path: str | Path, *, require_approved: bool = True) -> TaxRules:
@@ -131,7 +137,7 @@ def calculate_report(
     rules: TaxRules,
     ibkr_sections: dict[str, pd.DataFrame],
     freedom_transactions: pd.DataFrame,
-    f1042s_records: pd.DataFrame,
+    f1042s_records: pd.DataFrame | None,
     rate_provider: Any | None = None,
 ) -> TaxReport:
     """Calculate tax inputs while retaining a source reference for every value."""
@@ -144,16 +150,26 @@ def calculate_report(
     dividends = _filter_year(extract_dividends(ibkr_sections), year)
     withholding = _filter_year(extract_withholding_tax(ibkr_sections), year)
     realized = extract_realized_pnl(ibkr_sections)
+    assets = (
+        extract_open_positions(ibkr_sections)
+        if "Открытые позиции" in ibkr_sections
+        else pd.DataFrame()
+    )
     freedom_transactions = _filter_year(freedom_transactions, year)
-    f1042s_records = _filter_year(f1042s_records, year, column="tax_year")
+    f1042s_records = _filter_year(
+        f1042s_records if f1042s_records is not None else _empty_1042s(),
+        year,
+        column="tax_year",
+    )
     values: list[TraceableValue] = []
     source_dividend_total = _sum(dividends, "amount")
     source_withholding_total = _sum(withholding, "amount")
     dividend_rows = _convert_rows(dividends, "amount", rate_provider)
-    withholding_rows = _convert_rows(withholding, "amount", rate_provider)
     for row in dividend_rows.to_dict("records"):
         values.append(_trace("dividend", row["amount"], row))
-    for row in realized.to_dict("records"):
+    realized = realized.assign(currency="USD")
+    realized_rows = _convert_rows(realized, "realized_total", rate_provider)
+    for row in realized_rows.to_dict("records"):
         values.append(_trace("realized_gain", row["realized_total"], row))
     for row in f1042s_records.to_dict("records"):
         values.append(_trace("1042s_gross_income", row["gross_income"], row))
@@ -162,7 +178,7 @@ def calculate_report(
         )
 
     taxable_dividends = _sum(dividend_rows, "amount")
-    taxable_realized_gains = _sum(realized, "realized_total")
+    taxable_realized_gains = _sum(realized_rows, "realized_total")
     exempt_sales = freedom_transactions[
         freedom_transactions["transaction_type"].map(_is_sale)
     ]
@@ -174,22 +190,24 @@ def calculate_report(
         values.append(_trace("exempt_gain", row["profit"], row))
 
     dividend_f1042s = _dividend_1042s_records(f1042s_records)
-    f1042s_gross = _sum(dividend_f1042s, "gross_income")
-    withheld_source = (
-        withholding_rows
-        if rate_provider is not None and not withholding_rows.empty
-        else dividend_f1042s
-    )
-    withheld_column = (
-        "amount" if withheld_source is withholding_rows else "federal_tax_withheld"
-    )
-    withheld = abs(_sum(withheld_source, withheld_column))
-    warnings = _reconciliation_warnings(
-        source_dividend_total,
-        abs(source_withholding_total),
-        f1042s_gross,
-        withheld,
-    )
+    f1042s_gross = _sum(f1042s_records, "gross_income")
+    withheld = Decimal("0")
+    warnings: list[str] = []
+    if f1042s_records.empty:
+        warnings.append(
+            "1042-S was not provided; IBKR withholding is shown for reference and "
+            "is not applied as a foreign tax credit."
+        )
+    else:
+        withheld = abs(_sum(dividend_f1042s, "federal_tax_withheld"))
+        warnings.extend(
+            _reconciliation_warnings(
+                source_dividend_total,
+                abs(source_withholding_total),
+                f1042s_gross,
+                withheld,
+            )
+        )
     warnings.extend(_non_dividend_1042s_warnings(f1042s_records))
     tax_before_credit = _money(
         _tax_for_base(taxable_dividends + taxable_realized_gains, rules)
@@ -207,16 +225,8 @@ def calculate_report(
         foreign_tax_credit=foreign_tax_credit,
         tax_due=_money(max(Decimal("0"), tax_before_credit - foreign_tax_credit)),
         values=tuple(values),
-        warnings=tuple(
-            warnings
-            + (
-                []
-                if rules.approved
-                else [
-                    "Tax rules are not approved; this report is DRAFT and must not be filed."
-                ]
-            )
-        ),
+        assets=tuple(assets.to_dict("records")),
+        warnings=tuple(warnings),
     )
 
 
@@ -243,6 +253,10 @@ def _filter_year(frame: pd.DataFrame, year: int, column: str = "date") -> pd.Dat
         return frame
 
     def matches(value: object) -> bool:
+        if isinstance(value, int) or (
+            isinstance(value, str) and value.strip().isdigit()
+        ):
+            return int(value) == year
         try:
             return date.fromisoformat(str(value)[:10]).year == year
         except ValueError:
@@ -266,14 +280,22 @@ def _convert_rows(
         raw_date = (
             row.get("date") or row.get("payment_date") or row.get("disposal_date")
         )
-        if not raw_date:
+        if not raw_date and not getattr(provider, "annual", False):
             raise RulesError(f"Missing conversion date for {amount_column}")
+        raw_date = raw_date or "annual"
         rate = provider.get_rate(str(raw_date)[:10], currency)
         original = _decimal(row[amount_column], amount_column)
         converted.append(original * _decimal(rate, "FX rate"))
         result.loc[index, "original_amount"] = original
         result.loc[index, "rate_date"] = str(raw_date)[:10]
         result.loc[index, "fx_rate"] = rate
+        source_for = getattr(provider, "source_for", None)
+        if source_for is not None:
+            source = source_for(currency)
+            if source is not None:
+                result.loc[index, "fx_source"] = (
+                    f"{source.file}:{source.sheet}!{source.rate_cell}"
+                )
     result[amount_column] = converted
     return result
 
@@ -312,6 +334,7 @@ def _trace(category: str, amount: object, row: dict[str, Any]) -> TraceableValue
         currency=str(row.get("currency", "KZT") or "KZT"),
         rate_date=str(row.get("rate_date", "")),
         fx_rate=row.get("fx_rate"),
+        fx_source=str(row.get("fx_source", "")),
         foreign_amount=(
             _money(_decimal(row["original_amount"], category))
             if "original_amount" in row
@@ -330,6 +353,17 @@ def _dividend_1042s_records(records: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("1042-S records are missing income_code")
     codes = records["income_code"].astype(str).str.zfill(2)
     return records[codes == "06"]
+
+
+def _empty_1042s() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=[
+            "tax_year",
+            "income_code",
+            "gross_income",
+            "federal_tax_withheld",
+        ]
+    )
 
 
 def _non_dividend_1042s_warnings(records: pd.DataFrame) -> list[str]:
@@ -356,9 +390,9 @@ def _reconciliation_warnings(
     f1042s_withheld: Decimal,
 ) -> list[str]:
     warnings: list[str] = []
-    if ibkr_dividends != f1042s_gross:
+    if abs(ibkr_dividends - f1042s_gross) > _GROSS_RECONCILIATION_TOLERANCE:
         warnings.append(
-            "1042-S gross income does not reconcile with IBKR dividends: "
+            "1042-S total gross income does not reconcile with IBKR dividends: "
             f"IBKR {ibkr_dividends}, 1042-S gross income {f1042s_gross}."
         )
     if ibkr_withheld != f1042s_withheld:

@@ -5,6 +5,7 @@ import pytest
 
 from kz_tax_report.ibkr_parser import (
     extract_dividends,
+    extract_open_positions,
     extract_realized_pnl,
     extract_withholding_tax,
     parse_dividend_report,
@@ -88,6 +89,37 @@ def test_extract_realized_pnl_uses_symbol_rows_and_preserves_provenance(
             "symbol": "VOO",
             "realized_total": 25.5,
             "source_file": "realized.csv",
+            "source_row": 2,
+        }
+    ]
+
+
+def test_extract_open_positions_returns_summary_rows_for_form_270_04(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "positions.csv"
+    path.write_text(
+        "\n".join(
+            [
+                "Открытые позиции,Header,DataDiscriminator,Класс актива,Валюта,Символ,Количество",
+                "Открытые позиции,Data,Summary,Акции,USD,VOO,13.2724",
+                "Открытые позиции,Data,Total,Всего,USD,,13.2724",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    positions = extract_open_positions(parse_activity_statement(path))
+
+    assert positions.to_dict("records") == [
+        {
+            "asset_class": "Акции",
+            "currency": "USD",
+            "symbol": "VOO",
+            "quantity": 13.2724,
+            "isin": "",
+            "country": "",
+            "source_file": "positions.csv",
             "source_row": 2,
         }
     ]

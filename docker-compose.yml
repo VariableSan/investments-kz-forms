@@ -7,10 +7,9 @@ services:
       - ${INPUTS_HOST_DIR:-./data}:/inputs:ro
       - ${OUTPUT_HOST_DIR:-./output}:/outputs
     environment:
-      KZ_TAX_REPORT_NBK_URL: ${KZ_TAX_REPORT_NBK_URL:-}
-      KZ_TAX_REPORT_NBK_TIMEOUT: ${KZ_TAX_REPORT_NBK_TIMEOUT:-}
-      KZ_TAX_REPORT_NBK_CACHE_PATH: ${KZ_TAX_REPORT_NBK_CACHE_PATH:-}
-      KZ_TAX_REPORT_RULES_DIR: ${KZ_TAX_REPORT_RULES_DIR:-}
+      KZ_TAX_REPORT_NBK_DOWNLOAD_URL: ${KZ_TAX_REPORT_NBK_DOWNLOAD_URL:-}
+      KZ_TAX_REPORT_IBKR_REPORTS_URL: ${KZ_TAX_REPORT_IBKR_REPORTS_URL:-}
+      KZ_TAX_REPORT_FREEDOM_REPORTS_URL: ${KZ_TAX_REPORT_FREEDOM_REPORTS_URL:-}
     working_dir: /app
 
   web:
@@ -28,9 +27,12 @@ services:
       KZ_TAX_REPORT_ARTIFACT_MODE: local
       KZ_TAX_REPORT_ARTIFACT_DIR: /tmp/kz-tax-report-jobs
       KZ_TAX_REPORT_OUTPUT_DIR: /outputs
-      KZ_TAX_REPORT_RULES_DIR: ${KZ_TAX_REPORT_RULES_DIR:-}
+      KZ_TAX_REPORT_NBK_DOWNLOAD_URL: ${KZ_TAX_REPORT_NBK_DOWNLOAD_URL:-}
+      KZ_TAX_REPORT_IBKR_REPORTS_URL: ${KZ_TAX_REPORT_IBKR_REPORTS_URL:-}
+      KZ_TAX_REPORT_FREEDOM_REPORTS_URL: ${KZ_TAX_REPORT_FREEDOM_REPORTS_URL:-}
     working_dir: /app
-    command: ["/app/.venv/bin/kz-tax-report-ui"]
+    entrypoint: ["/app/.venv/bin/kz-tax-report-ui"]
+    command: []
     healthcheck:
       test:
         ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
@@ -62,9 +64,13 @@ services:
       KZ_TAX_REPORT_SESSION_SECRET: ${KZ_TAX_REPORT_SESSION_SECRET:-}
       KZ_TAX_REPORT_PUBLIC_URL: ${KZ_TAX_REPORT_PUBLIC_URL:-}
       KZ_TAX_REPORT_TRUST_PROXY: ${KZ_TAX_REPORT_TRUST_PROXY:-}
+      KZ_TAX_REPORT_NBK_DOWNLOAD_URL: ${KZ_TAX_REPORT_NBK_DOWNLOAD_URL:-}
+      KZ_TAX_REPORT_IBKR_REPORTS_URL: ${KZ_TAX_REPORT_IBKR_REPORTS_URL:-}
+      KZ_TAX_REPORT_FREEDOM_REPORTS_URL: ${KZ_TAX_REPORT_FREEDOM_REPORTS_URL:-}
       KZ_TAX_REPORT_RULES_DIR: ${KZ_TAX_REPORT_RULES_DIR:-}
     working_dir: /app
-    command: ["/app/.venv/bin/kz-tax-report-ui"]
+    entrypoint: ["/app/.venv/bin/kz-tax-report-ui"]
+    command: []
     healthcheck:
       test:
         ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]

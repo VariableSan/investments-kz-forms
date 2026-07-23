@@ -57,26 +57,28 @@ The local sample directory contains four observed report types:
 - IRS Form 1042-S PDF: foreign income and US withholding confirmation.
 - Freedom Bank brokerage PDF: ETN summary and transaction ledger.
 
-The CSV, 1042-S PDF, and Freedom PDF are the planned core inputs. The HTML
-report is optional and must not be required for a normal run.
+The CSV, annual-rate XLSX, and Freedom PDF are the required inputs. The 1042-S
+PDF is optional and enables reconciliation plus a foreign-tax-credit check.
+The HTML report is optional and must not be required for a normal run.
 
 ## CLI
 
 The CLI calculates a source-traceable report and writes both XLSX and Markdown
-outputs. Rules must be explicitly approved and can be supplied with `--rules`:
+outputs. The annual-rate workbook is downloaded manually from the official NBK
+page configured by `KZ_TAX_REPORT_NBK_DOWNLOAD_URL`:
 
 ```bash
 uv run kz-tax-report --ibkr path/to/activity.csv \
 	--freedom path/to/freedom.pdf \
-	--f1042s path/to/1042s.pdf \
+	--annual-rates path/to/2025-rates.xlsx \
 	--year 2025 \
-	--rules path/to/approved-rules-2025.yaml \
 	--out output/report.xlsx
 ```
 
-Generated reports include source-row provenance, reconciliation warnings, and a
-Markdown summary for manual entry. The bundled year file is intentionally
-unapproved until its official citation and values have been reviewed. No
+Add `--f1042s path/to/1042s.pdf` when the form is available. Without it, IBKR
+withholding is shown as reference only and is not used as a foreign-tax credit.
+Generated reports include source-row provenance, annual-rate workbook
+provenance, 270.01 values, 270.04 asset preparation and warnings. No
 electronic filing is supported.
 
 ## Docker Batch Mode
@@ -95,9 +97,8 @@ depend on the deployment. The application keeps built-in fallback values when
 these variables are absent or empty. Explicit CLI options such as `--rules`
 still take precedence over environment settings.
 
-Supported application variables include `KZ_TAX_REPORT_NBK_URL`,
-`KZ_TAX_REPORT_NBK_TIMEOUT`, `KZ_TAX_REPORT_NBK_CACHE_PATH`, and
-`KZ_TAX_REPORT_RULES_DIR`. Browser artifact policy is controlled by
+The only NBK setting is `KZ_TAX_REPORT_NBK_DOWNLOAD_URL`; the application does
+not fetch or cache government rates. Browser artifact policy is controlled by
 `KZ_TAX_REPORT_ARTIFACT_DIR`, `KZ_TAX_REPORT_ARTIFACT_MODE`,
 `KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS`, `KZ_TAX_REPORT_MAX_UPLOAD_BYTES`, and
 `KZ_TAX_REPORT_MAX_JOB_BYTES`. `INPUTS_HOST_DIR` and `OUTPUT_HOST_DIR` control
@@ -168,20 +169,18 @@ make docker-build
 make docker-web
 ```
 
-The UI accepts an IBKR CSV, Freedom Bank PDF, and 1042-S PDF, then shows the
-calculated totals and reconciliation warnings before offering XLSX and
-Markdown downloads. The Tax rules panel starts with the year-specific YAML,
-provides a separate manual `Approved` toggle, and materializes edits only in
-the current session. It does not transmit files to a tax authority or cloud
-service.
+The UI accepts an IBKR CSV, Freedom Bank PDF and annual-rate XLSX, with an
+optional 1042-S PDF. It shows calculated totals, 270.04 asset preparation and
+warnings before offering XLSX and Markdown downloads. Tax rules are internal
+year-specific YAML configuration and are not edited in the browser. The app
+does not transmit files to a tax authority or download government data.
 
 ## Tax Rules Disclaimer
 
 This is software for calculation assistance, not tax or legal advice. Rates,
 treaty treatment, exemptions, and Form 270.01 mappings must be verified against
 the applicable Kazakhstan Tax Code and official instructions for each year.
-Year-specific rules will be versioned in YAML and calculations will refuse
-unapproved or incomplete rule files.
+Year-specific rules are versioned in YAML and should be verified before filing.
 
 ## Plans
 
