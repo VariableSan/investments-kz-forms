@@ -5,6 +5,7 @@ import pytest
 
 from kz_tax_report.ibkr_parser import (
     extract_dividends,
+    extract_instrument_identifiers,
     extract_open_positions,
     extract_realized_pnl,
     extract_withholding_tax,
@@ -123,6 +124,46 @@ def test_extract_open_positions_returns_summary_rows_for_form_270_04(
             "source_row": 2,
         }
     ]
+    assert (
+        extract_open_positions(parse_activity_statement(path), auto_fill_isin=True).loc[
+            0, "isin"
+        ]
+        == ""
+    )
+
+
+def test_extract_open_positions_can_prefill_unique_local_isin(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "positions-with-instruments.csv"
+    path.write_text(
+        "\n".join(
+            [
+                "Открытые позиции,Header,DataDiscriminator,Класс актива,Валюта,Символ,Количество",
+                "Открытые позиции,Data,Summary,Акции,USD,VOO,13.2724",
+                "Информация о финансовом инструменте,Header,Символ,ISIN,Страна",
+                "Информация о финансовом инструменте,Data,VOO,US9229083632,США",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    sections = parse_activity_statement(path)
+    identifiers = extract_instrument_identifiers(sections)
+
+    assert identifiers.to_dict("records") == [
+        {
+            "symbol": "VOO",
+            "isin": "US9229083632",
+            "country": "США",
+            "source_file": "positions-with-instruments.csv",
+            "source_row": 4,
+        }
+    ]
+    assert extract_open_positions(sections, auto_fill_isin=False).loc[0, "isin"] == ""
+    positions = extract_open_positions(sections, auto_fill_isin=True)
+    assert positions.loc[0, "isin"] == "US9229083632"
+    assert positions.loc[0, "isin_source_row"] == 4
 
 
 def test_parse_optional_html_dividend_report_and_reconcile(tmp_path: Path) -> None:

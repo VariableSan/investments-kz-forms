@@ -68,6 +68,15 @@ def write_xlsx(report: TaxReport, path: str | Path) -> None:
             f"{report.status}; verify rules before filing",
         ),
     ]
+    paste_rows.extend(
+        (
+            item.label,
+            item.amount,
+            item.form_line,
+            f"{item.status}; {item.note} Source: {item.source_file}:{item.source_row}",
+        )
+        for item in report.declaration_items
+    )
     for row in paste_rows:
         paste.append(row)
 
@@ -170,6 +179,10 @@ def write_markdown(report: TaxReport, path: str | Path) -> None:
         "| Category | Amount KZT | Foreign amount | Currency | Rate | Source |",
         "| --- | ---: | ---: | --- | ---: | --- |",
     ]
+    lines.extend(
+        f"| {item.label} | {item.amount} | {item.form_line} | {item.status}; {item.note}; Source: {item.source_file}:{item.source_row} |"
+        for item in report.declaration_items
+    )
     lines.extend(
         f"| {value.category} | {value.amount} | {value.foreign_amount or ''} | {value.currency} | {value.fx_rate or ''} | {value.source_file}:{value.source_row} |"
         for value in report.values

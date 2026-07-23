@@ -56,6 +56,17 @@ class TraceableValue:
 
 
 @dataclass(frozen=True)
+class DeclarationItem:
+    label: str
+    amount: Decimal
+    form_line: str
+    status: str
+    note: str
+    source_file: str
+    source_row: int
+
+
+@dataclass(frozen=True)
 class TaxReport:
     year: int
     rules: TaxRules
@@ -66,6 +77,7 @@ class TaxReport:
     foreign_tax_credit: Decimal
     tax_due: Decimal
     values: tuple[TraceableValue, ...]
+    declaration_items: tuple[DeclarationItem, ...]
     assets: tuple[dict[str, Any], ...]
     warnings: tuple[str, ...]
 
@@ -139,6 +151,7 @@ def calculate_report(
     freedom_transactions: pd.DataFrame,
     f1042s_records: pd.DataFrame | None,
     rate_provider: Any | None = None,
+    auto_fill_isin: bool = False,
 ) -> TaxReport:
     """Calculate tax inputs while retaining a source reference for every value."""
 
@@ -151,7 +164,7 @@ def calculate_report(
     withholding = _filter_year(extract_withholding_tax(ibkr_sections), year)
     realized = extract_realized_pnl(ibkr_sections)
     assets = (
-        extract_open_positions(ibkr_sections)
+        extract_open_positions(ibkr_sections, auto_fill_isin=auto_fill_isin)
         if "Открытые позиции" in ibkr_sections
         else pd.DataFrame()
     )
@@ -162,6 +175,7 @@ def calculate_report(
         column="tax_year",
     )
     values: list[TraceableValue] = []
+    declaration_items: list[DeclarationItem] = []
     source_dividend_total = _sum(dividends, "amount")
     source_withholding_total = _sum(withholding, "amount")
     dividend_rows = _convert_rows(dividends, "amount", rate_provider)
@@ -176,6 +190,26 @@ def calculate_report(
         values.append(
             _trace("1042s_federal_tax_withheld", row["federal_tax_withheld"], row)
         )
+
+    non_dividend_records = f1042s_records[
+        f1042s_records["income_code"].astype(str).str.zfill(2) != "06"
+    ]
+    if not non_dividend_records.empty:
+        review_rows = non_dividend_records.assign(currency="USD")
+        for row in _convert_rows(review_rows, "gross_income", rate_provider).to_dict(
+            "records"
+        ):
+            declaration_items.append(
+                DeclarationItem(
+                    label=f"1042-S income code {str(row['income_code']).zfill(2)}",
+                    amount=_money(_decimal(row["gross_income"], "gross_income")),
+                    form_line="manual",
+                    status="manual classification required",
+                    note="Shown for review; excluded from dividend tax and foreign tax credit.",
+                    source_file=str(row["source_file"]),
+                    source_row=int(row["source_row"]),
+                )
+            )
 
     taxable_dividends = _sum(dividend_rows, "amount")
     taxable_realized_gains = _sum(realized_rows, "realized_total")
@@ -225,6 +259,7 @@ def calculate_report(
         foreign_tax_credit=foreign_tax_credit,
         tax_due=_money(max(Decimal("0"), tax_before_credit - foreign_tax_credit)),
         values=tuple(values),
+        declaration_items=tuple(declaration_items),
         assets=tuple(assets.to_dict("records")),
         warnings=tuple(warnings),
     )
@@ -384,20 +419,21 @@ def _non_dividend_1042s_warnings(records: pd.DataFrame) -> list[str]:
 
 
 def _reconciliation_warnings(
-    ibkr_dividends: Decimal,
+    ibkr_income: Decimal,
     ibkr_withheld: Decimal,
     f1042s_gross: Decimal,
     f1042s_withheld: Decimal,
 ) -> list[str]:
     warnings: list[str] = []
-    if abs(ibkr_dividends - f1042s_gross) > _GROSS_RECONCILIATION_TOLERANCE:
+    if abs(ibkr_income - f1042s_gross) > _GROSS_RECONCILIATION_TOLERANCE:
         warnings.append(
-            "1042-S total gross income does not reconcile with IBKR dividends: "
-            f"IBKR {ibkr_dividends}, 1042-S gross income {f1042s_gross}."
+            "1042-S gross income does not reconcile with IBKR income: "
+            f"IBKR {ibkr_income}, 1042-S total gross income {f1042s_gross}."
         )
     if ibkr_withheld != f1042s_withheld:
         warnings.append(
             "1042-S federal tax withheld does not reconcile with IBKR withholding: "
-            f"IBKR {ibkr_withheld}, 1042-S {f1042s_withheld}."
+            f"IBKR aggregate {ibkr_withheld}, 1042-S code 06 {f1042s_withheld}; "
+            "these are different scopes, so the 1042-S amount is used for credit."
         )
     return warnings

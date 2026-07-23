@@ -1,7 +1,7 @@
 year: 2025
 approved: false
 citation: "Pending verification against the official Kazakhstan Tax Code and Form 270.01 instructions."
-conversion_policy: "NBK rate on payment or disposal date; previous published rate for non-business days"
+conversion_policy: "Official NBK annual average rate for the tax year"
 form_labels:
   dividends: "Foreign dividends gross"
   realized_gains: "Foreign capital gains"

@@ -109,8 +109,10 @@ def extract_realized_pnl(sections: dict[str, pd.DataFrame]) -> pd.DataFrame:
     )[["asset_class", "symbol", "realized_total", "source_file", "source_row"]]
 
 
-def extract_open_positions(sections: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Return IBKR closing positions with fields useful for Form 270.04."""
+def _extract_open_positions(
+    sections: dict[str, pd.DataFrame], *, auto_fill_isin: bool
+) -> pd.DataFrame:
+    """Extract positions, optionally joining exact local instrument metadata."""
 
     frame = _require_section(sections, "Открытые позиции")
     discriminator = _find_column(frame, "DataDiscriminator", "Тип данных")
@@ -120,7 +122,7 @@ def extract_open_positions(sections: dict[str, pd.DataFrame]) -> pd.DataFrame:
     quantity_column = _find_column(frame, "Количество", "quantity")
     detail = frame[frame[discriminator].astype(str).str.casefold() == "summary"].copy()
     detail["quantity"] = _to_number(detail[quantity_column], quantity_column)
-    return detail.assign(
+    result = detail.assign(
         asset_class=detail[asset_column],
         currency=detail[currency_column],
         symbol=detail[symbol_column],
@@ -138,6 +140,63 @@ def extract_open_positions(sections: dict[str, pd.DataFrame]) -> pd.DataFrame:
             "source_row",
         ]
     ]
+    if not auto_fill_isin:
+        return result
+
+    identifiers = extract_instrument_identifiers(sections)
+    if identifiers.empty:
+        return result.assign(isin_source_file="", isin_source_row="")
+    unique_identifiers = identifiers.groupby("symbol", dropna=False).filter(
+        lambda rows: len(rows) == 1
+    )
+    lookup = unique_identifiers.set_index("symbol").to_dict("index")
+    result["isin"] = result["symbol"].map(
+        lambda symbol: lookup.get(symbol, {}).get("isin", "")
+    )
+    result["country"] = result["symbol"].map(
+        lambda symbol: lookup.get(symbol, {}).get("country", "")
+    )
+    result["isin_source_file"] = result["symbol"].map(
+        lambda symbol: lookup.get(symbol, {}).get("source_file", "")
+    )
+    result["isin_source_row"] = result["symbol"].map(
+        lambda symbol: lookup.get(symbol, {}).get("source_row", "")
+    )
+    return result
+
+
+def extract_open_positions(
+    sections: dict[str, pd.DataFrame], *, auto_fill_isin: bool = False
+) -> pd.DataFrame:
+    """Return IBKR closing positions, optionally enriched from local metadata."""
+
+    return _extract_open_positions(sections, auto_fill_isin=auto_fill_isin)
+
+
+def extract_instrument_identifiers(
+    sections: dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """Return local symbol, ISIN, and country metadata with source provenance."""
+
+    empty_columns = ["symbol", "isin", "country", "source_file", "source_row"]
+    if "Информация о финансовом инструменте" not in sections:
+        return pd.DataFrame(columns=empty_columns)
+    frame = _require_section(sections, "Информация о финансовом инструменте")
+    symbol_column = _find_column(frame, "Символ", "symbol")
+    isin_column = _find_column(frame, "ISIN", "isin")
+    country_column = _find_column(frame, "Страна", "country")
+    result = pd.DataFrame(
+        {
+            "symbol": frame[symbol_column].astype(str).str.strip(),
+            "isin": frame[isin_column].astype(str).str.strip(),
+            "country": frame[country_column].astype(str).str.strip(),
+            "source_file": frame["source_file"],
+            "source_row": frame["source_row"],
+        }
+    )
+    return result[(result["symbol"] != "") & (result["isin"] != "")].reset_index(
+        drop=True
+    )
 
 
 def parse_dividend_report(path: str | Path) -> pd.DataFrame:

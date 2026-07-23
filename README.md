@@ -10,6 +10,19 @@ Jobs are cleaned up by a configurable TTL so downloads are not invalidated by
 browser disconnects. Rules edited in the browser are session-only and are
 never written back to the bundled YAML.
 
+## License And Disclaimer
+
+This project is available under the PolyForm Noncommercial License 1.0.0. It
+is source-available and may not be used for commercial purposes; it is not an
+OSI-certified open-source license. The software is calculation assistance, not
+tax or legal advice. Verify every source, rule, form line, and final declaration
+before filing. The author and operator accept no responsibility for filing
+correctness.
+
+The optional ISIN prefill reads only exact matches from the uploaded IBKR
+report. It makes no external requests. Missing or ambiguous values require
+manual completion. The application never submits a declaration electronically.
+
 ## Privacy Boundary
 
 Brokerage reports contain financial data and personal identifiers. Keep real

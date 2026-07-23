@@ -250,7 +250,11 @@ class CalculationWorkspace:
             )
 
     def calculate(
-        self, year: int, rules_path: str | Path | None = None
+        self,
+        year: int,
+        rules_path: str | Path | None = None,
+        *,
+        auto_fill_isin: bool = False,
     ) -> CalculationArtifacts:
         """Parse the session inputs and write traceable report artifacts."""
 
@@ -268,6 +272,7 @@ class CalculationWorkspace:
             xlsx_path=self.root / "form-270-report.xlsx",
             markdown_path=self.root / "form-270-report.md",
             rules_path=rules_path,
+            auto_fill_isin=auto_fill_isin,
         )
         return CalculationArtifacts(
             report, self.root / "form-270-report.xlsx", self.root / "form-270-report.md"
@@ -329,6 +334,7 @@ def calculate_files(
     markdown_path: str | Path,
     rules_path: str | Path | None = None,
     rate_provider: AnnualRateProvider | None = None,
+    auto_fill_isin: bool = False,
 ) -> TaxReport:
     """Calculate and write a report from broker files and an annual-rate workbook."""
 
@@ -343,6 +349,7 @@ def calculate_files(
             else None
         ),
         rate_provider=rate_provider or AnnualRateProvider(annual_rates_path, year),
+        auto_fill_isin=auto_fill_isin,
     )
     Path(xlsx_path).parent.mkdir(parents=True, exist_ok=True)
     write_xlsx(report, xlsx_path)

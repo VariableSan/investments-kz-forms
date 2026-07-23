@@ -75,6 +75,14 @@ def index() -> None:
     )
 
     with ui.column().classes("page-shell w-full p-6 gap-5"):
+        with ui.card().classes("w-full bg-amber-50 border border-amber-300"):
+            ui.label("Важное предупреждение").classes("font-bold text-amber-950")
+            ui.label(
+                "Программа только помогает подготовить расчёт и не является налоговой "
+                "или юридической консультацией. Проверьте источники, правила и "
+                "итоговую декларацию самостоятельно. Автор и оператор программы не "
+                "несут ответственности за корректность подачи."
+            ).classes("text-sm text-amber-950")
         ui.label("Подготовка формы 270").classes("text-4xl font-bold")
         ui.label(
             "Загрузите отчёты брокеров и официальный среднегодовой курс. "
@@ -103,6 +111,10 @@ def index() -> None:
             "Налоговый год", value=2025, min=2000, max=2100, format="%.0f"
         ).classes("w-48")
         status = ui.label("Ожидаются три обязательных файла").classes("text-gray-600")
+        auto_fill_isin = ui.checkbox(
+            "Заполнить ISIN из загруженного IBKR отчёта (только локально)",
+            value=False,
+        ).classes("text-sm")
         upload_specs = (
             ("activity.csv", "IBKR Activity Statement", ".csv"),
             ("freedom.pdf", "Выписка Freedom", ".pdf"),
@@ -132,7 +144,9 @@ def index() -> None:
         def calculate() -> None:
             result_area.clear()
             try:
-                artifacts = workspace.calculate(int(year.value))
+                artifacts = workspace.calculate(
+                    int(year.value), auto_fill_isin=bool(auto_fill_isin.value)
+                )
                 exported_paths = None
                 if artifact_manager.policy.mode == "local":
                     exported_paths = export_artifacts(
@@ -165,6 +179,74 @@ def index() -> None:
                         with ui.card().classes("metric min-w-52 grow"):
                             ui.label(label).classes("text-sm text-gray-600")
                             ui.label(str(value)).classes("text-2xl font-bold")
+                with ui.card().classes("w-full bg-white border border-stone-200"):
+                    ui.label("Данные для переноса в 270.01").classes(
+                        "text-xl font-bold"
+                    )
+                    ui.table(
+                        columns=[
+                            {"name": "label", "label": "Показатель", "field": "label"},
+                            {"name": "amount", "label": "KZT", "field": "amount"},
+                            {"name": "line", "label": "Строка", "field": "line"},
+                            {"name": "status", "label": "Статус", "field": "status"},
+                        ],
+                        rows=[
+                            {
+                                "label": report.rules.form_labels.get(
+                                    "dividends", "Foreign dividends gross"
+                                ),
+                                "amount": str(report.taxable_dividends),
+                                "line": report.rules.dividends_line,
+                                "status": "calculated",
+                            },
+                            {
+                                "label": report.rules.form_labels.get(
+                                    "realized_gains", "Foreign realized gains"
+                                ),
+                                "amount": str(report.taxable_realized_gains),
+                                "line": report.rules.realized_gains_line,
+                                "status": "calculated",
+                            },
+                            *[
+                                {
+                                    "label": item.label,
+                                    "amount": str(item.amount),
+                                    "line": item.form_line,
+                                    "status": item.status,
+                                }
+                                for item in report.declaration_items
+                            ],
+                        ],
+                        row_key="label",
+                    ).classes("w-full")
+                with ui.card().classes("w-full bg-white border border-stone-200"):
+                    ui.label("Активы на 31 декабря для 270.04").classes(
+                        "text-xl font-bold"
+                    )
+                    ui.table(
+                        columns=[
+                            {"name": "asset", "label": "Инструмент", "field": "asset"},
+                            {"name": "isin", "label": "ISIN", "field": "isin"},
+                            {
+                                "name": "quantity",
+                                "label": "Количество",
+                                "field": "quantity",
+                            },
+                            {"name": "country", "label": "Страна", "field": "country"},
+                            {"name": "source", "label": "Источник", "field": "source"},
+                        ],
+                        rows=[
+                            {
+                                "asset": asset.get("symbol", ""),
+                                "isin": asset.get("isin", "") or "ввести вручную",
+                                "quantity": str(asset.get("quantity", "")),
+                                "country": asset.get("country", "") or "ввести вручную",
+                                "source": f"{asset.get('source_file', '')}:{asset.get('source_row', '')}",
+                            }
+                            for asset in report.assets
+                        ],
+                        row_key="asset",
+                    ).classes("w-full")
                 if report.warnings:
                     with ui.card().classes("w-full bg-red-50 border border-red-200"):
                         ui.label("Нужна ручная проверка").classes("font-bold")
