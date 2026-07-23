@@ -7,6 +7,7 @@ from kz_tax_report.app_service import (
     ArtifactPolicy,
     CalculationWorkspace,
     InputValidationError,
+    _input_fingerprint,
     export_artifacts,
 )
 
@@ -21,6 +22,16 @@ def test_workspace_stores_only_expected_upload_names(tmp_path: Path) -> None:
 
     with pytest.raises(InputValidationError, match="Unsupported upload"):
         workspace.save_upload("secrets.txt", b"private")
+
+
+def test_input_fingerprint_changes_when_source_changes(tmp_path: Path) -> None:
+    source = tmp_path / "activity.csv"
+    source.write_bytes(b"first")
+
+    first = _input_fingerprint(source)
+    source.write_bytes(b"second")
+
+    assert first != _input_fingerprint(source)
 
 
 def test_workspace_validation_reports_missing_inputs(tmp_path: Path) -> None:

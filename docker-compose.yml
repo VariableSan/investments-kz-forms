@@ -13,7 +13,7 @@ services:
     working_dir: /app
 
   web:
-    profiles: [web]
+    profiles: [ web ]
     build:
       context: .
     image: kz-tax-report:local
@@ -26,22 +26,25 @@ services:
       KZ_TAX_REPORT_UI_PORT: 8080
       KZ_TAX_REPORT_ARTIFACT_MODE: local
       KZ_TAX_REPORT_ARTIFACT_DIR: /tmp/kz-tax-report-jobs
+      KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS: ${KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS:-}
+      KZ_TAX_REPORT_MAX_UPLOAD_BYTES: ${KZ_TAX_REPORT_MAX_UPLOAD_BYTES:-}
+      KZ_TAX_REPORT_MAX_JOB_BYTES: ${KZ_TAX_REPORT_MAX_JOB_BYTES:-}
       KZ_TAX_REPORT_OUTPUT_DIR: /outputs
+      KZ_TAX_REPORT_RULES_DIR: ${KZ_TAX_REPORT_RULES_DIR:-}
       KZ_TAX_REPORT_NBK_DOWNLOAD_URL: ${KZ_TAX_REPORT_NBK_DOWNLOAD_URL:-}
       KZ_TAX_REPORT_IBKR_REPORTS_URL: ${KZ_TAX_REPORT_IBKR_REPORTS_URL:-}
       KZ_TAX_REPORT_FREEDOM_REPORTS_URL: ${KZ_TAX_REPORT_FREEDOM_REPORTS_URL:-}
     working_dir: /app
-    entrypoint: ["/app/.venv/bin/kz-tax-report-ui"]
+    entrypoint: [ "/app/.venv/bin/kz-tax-report-ui" ]
     command: []
     healthcheck:
-      test:
-        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)" ]
       interval: 30s
       timeout: 5s
       retries: 3
 
   web-hosted:
-    profiles: [hosted]
+    profiles: [ hosted ]
     build:
       context: .
     image: kz-tax-report:local
@@ -69,11 +72,10 @@ services:
       KZ_TAX_REPORT_FREEDOM_REPORTS_URL: ${KZ_TAX_REPORT_FREEDOM_REPORTS_URL:-}
       KZ_TAX_REPORT_RULES_DIR: ${KZ_TAX_REPORT_RULES_DIR:-}
     working_dir: /app
-    entrypoint: ["/app/.venv/bin/kz-tax-report-ui"]
+    entrypoint: [ "/app/.venv/bin/kz-tax-report-ui" ]
     command: []
     healthcheck:
-      test:
-        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)" ]
       interval: 30s
       timeout: 5s
       retries: 3

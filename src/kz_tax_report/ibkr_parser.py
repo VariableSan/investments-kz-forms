@@ -183,13 +183,30 @@ def extract_instrument_identifiers(
         return pd.DataFrame(columns=empty_columns)
     frame = _require_section(sections, "Информация о финансовом инструменте")
     symbol_column = _find_column(frame, "Символ", "symbol")
-    isin_column = _find_column(frame, "ISIN", "isin")
-    country_column = _find_column(frame, "Страна", "country")
+    isin_column = _find_column(
+        frame,
+        "ISIN",
+        "isin",
+        "Идентификатор ценной бумаги",
+        "Security Identifier",
+    )
+    country_column = next(
+        (
+            candidate
+            for candidate in ("Страна", "country", "Country")
+            if candidate in frame.columns
+        ),
+        None,
+    )
     result = pd.DataFrame(
         {
             "symbol": frame[symbol_column].astype(str).str.strip(),
             "isin": frame[isin_column].astype(str).str.strip(),
-            "country": frame[country_column].astype(str).str.strip(),
+            "country": (
+                frame[country_column].astype(str).str.strip()
+                if country_column is not None
+                else ""
+            ),
             "source_file": frame["source_file"],
             "source_row": frame["source_row"],
         }

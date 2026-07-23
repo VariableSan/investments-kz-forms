@@ -1,0 +1,35 @@
+services:
+  web:
+    image: ${KZ_TAX_REPORT_IMAGE:-ghcr.io/variablesan/investments-kz-forms:latest}
+    expose:
+      - "8080"
+    tmpfs:
+      - /tmp/kz-tax-report-jobs:mode=700
+    environment:
+      KZ_TAX_REPORT_UI_HOST: 0.0.0.0
+      KZ_TAX_REPORT_UI_PORT: 8080
+      KZ_TAX_REPORT_MODE: hosted
+      KZ_TAX_REPORT_ARTIFACT_MODE: hosted
+      KZ_TAX_REPORT_ARTIFACT_DIR: /tmp/kz-tax-report-jobs
+      KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS: ${KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS:?Set artifact TTL in Dokploy}
+      KZ_TAX_REPORT_MAX_UPLOAD_BYTES: ${KZ_TAX_REPORT_MAX_UPLOAD_BYTES:?Set max upload bytes in Dokploy}
+      KZ_TAX_REPORT_MAX_JOB_BYTES: ${KZ_TAX_REPORT_MAX_JOB_BYTES:?Set max job bytes in Dokploy}
+      KZ_TAX_REPORT_ACCESS_ISSUER: ${KZ_TAX_REPORT_ACCESS_ISSUER:?Set Cloudflare Access issuer in Dokploy}
+      KZ_TAX_REPORT_ACCESS_AUDIENCE: ${KZ_TAX_REPORT_ACCESS_AUDIENCE:?Set Cloudflare Access audience in Dokploy}
+      KZ_TAX_REPORT_ACCESS_JWKS_URL: ${KZ_TAX_REPORT_ACCESS_JWKS_URL:?Set Cloudflare Access JWKS URL in Dokploy}
+      KZ_TAX_REPORT_SESSION_SECRET: ${KZ_TAX_REPORT_SESSION_SECRET:?Set a session secret in Dokploy}
+      KZ_TAX_REPORT_PUBLIC_URL: ${KZ_TAX_REPORT_PUBLIC_URL:?Set the HTTPS public URL in Dokploy}
+      KZ_TAX_REPORT_TRUST_PROXY: "true"
+      KZ_TAX_REPORT_NBK_DOWNLOAD_URL: ${KZ_TAX_REPORT_NBK_DOWNLOAD_URL:-https://nationalbank.kz/ru/news/oficialnye-kursy}
+      KZ_TAX_REPORT_IBKR_REPORTS_URL: ${KZ_TAX_REPORT_IBKR_REPORTS_URL:-https://www.interactivebrokers.com/en/support/reports.php}
+      KZ_TAX_REPORT_FREEDOM_REPORTS_URL: ${KZ_TAX_REPORT_FREEDOM_REPORTS_URL:-https://bankffin.kz/ru/faq}
+      KZ_TAX_REPORT_RULES_DIR: ${KZ_TAX_REPORT_RULES_DIR:-}
+    working_dir: /app
+    entrypoint: ["/app/.venv/bin/kz-tax-report-ui"]
+    command: []
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

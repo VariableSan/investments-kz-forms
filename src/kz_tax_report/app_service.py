@@ -1,10 +1,11 @@
 """Shared calculation service for CLI and local browser workflows."""
 
 import json
+import hashlib
 import os
 import shutil
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -338,9 +339,10 @@ def calculate_files(
 ) -> TaxReport:
     """Calculate and write a report from broker files and an annual-rate workbook."""
 
+    selected_rules_path = Path(rules_path or get_rules_path(year))
     report = calculate_report(
         year=year,
-        rules=load_rules(rules_path or get_rules_path(year), require_approved=False),
+        rules=load_rules(selected_rules_path, require_approved=False),
         ibkr_sections=parse_activity_statement(ibkr_path),
         freedom_transactions=parse_freedom_report(freedom_path),
         f1042s_records=(
@@ -351,7 +353,31 @@ def calculate_files(
         rate_provider=rate_provider or AnnualRateProvider(annual_rates_path, year),
         auto_fill_isin=auto_fill_isin,
     )
+    report = replace(
+        report,
+        input_fingerprint=_input_fingerprint(
+            ibkr_path,
+            freedom_path,
+            annual_rates_path,
+            f1042s_path,
+            selected_rules_path,
+        ),
+    )
     Path(xlsx_path).parent.mkdir(parents=True, exist_ok=True)
     write_xlsx(report, xlsx_path)
     write_markdown(report, markdown_path)
     return report
+
+
+def _input_fingerprint(*paths: str | Path | None) -> str:
+    digest = hashlib.sha256()
+    for path in paths:
+        if path is None:
+            digest.update(b"<missing>\0")
+            continue
+        source = Path(path)
+        digest.update(source.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(source.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()

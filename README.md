@@ -91,8 +91,11 @@ uv run kz-tax-report --ibkr path/to/activity.csv \
 Add `--f1042s path/to/1042s.pdf` when the form is available. Without it, IBKR
 withholding is shown as reference only and is not used as a foreign-tax credit.
 Generated reports include source-row provenance, annual-rate workbook
-provenance, 270.01 values, 270.04 asset preparation and warnings. No
-electronic filing is supported.
+provenance, 270.01 values, 270.04 asset preparation, input fingerprint, and
+warnings. Foreign tax credit amounts from 1042-S are converted from USD to KZT
+using the supplied annual-rate workbook before the configured cap is applied.
+No electronic filing is supported. Reports based on unapproved tax rules are
+marked `DRAFT / NOT FOR FILING`.
 
 ## Docker Batch Mode
 
@@ -167,6 +170,27 @@ The server necessarily sees plaintext PDF and CSV contents while parsing. This
 is an intentional hosted risk, not a zero-knowledge design; only invited
 identities should be allowed through Access.
 
+### Dokploy Compose File
+
+For Dokploy, paste `docker-compose.prod.yml` into the Compose editor. The file
+pulls `ghcr.io/variablesan/investments-kz-forms:latest` by default; set
+`KZ_TAX_REPORT_IMAGE` when deploying a different tag. Add these values to the
+Dokploy environment/secrets before deploying:
+
+- `KZ_TAX_REPORT_ACCESS_ISSUER`
+- `KZ_TAX_REPORT_ACCESS_AUDIENCE`
+- `KZ_TAX_REPORT_ACCESS_JWKS_URL`
+- `KZ_TAX_REPORT_SESSION_SECRET` (at least 32 bytes)
+- `KZ_TAX_REPORT_PUBLIC_URL`
+- `KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS`
+- `KZ_TAX_REPORT_MAX_UPLOAD_BYTES`
+- `KZ_TAX_REPORT_MAX_JOB_BYTES`
+
+The service listens on internal port `8080`; configure the Dokploy domain or
+Cloudflare Tunnel to route to that port. The production file uses hosted mode,
+an ephemeral job directory, and no host output mount. Keep Cloudflare Access
+as the only public ingress and set its policy to invite-only.
+
 ## Browser UI
 
 Run the local UI on `127.0.0.1:8080`:
@@ -174,6 +198,10 @@ Run the local UI on `127.0.0.1:8080`:
 ```bash
 make web
 ```
+
+`make web` loads the project `.env` before starting the native UI. Running
+`uv run kz-tax-report-ui` directly does not load `.env`; export variables in
+the shell first when using that form.
 
 For a LAN deployment using Compose, review the privacy warning and run:
 

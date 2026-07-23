@@ -166,6 +166,33 @@ def test_extract_open_positions_can_prefill_unique_local_isin(
     assert positions.loc[0, "isin_source_row"] == 4
 
 
+def test_extract_instrument_identifiers_accepts_ibkr_russian_security_header(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "ibkr-russian-instrument-header.csv"
+    path.write_text(
+        "\n".join(
+            [
+                "Информация о финансовом инструменте,Header,Класс актива,Символ,Описание,ID контракта,Идентификатор ценной бумаги,Андерлаинг",
+                "Информация о финансовом инструменте,Data,Акции,VOO,Vanguard ETF,1,US9229083632,VOO",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    identifiers = extract_instrument_identifiers(parse_activity_statement(path))
+
+    assert identifiers.to_dict("records") == [
+        {
+            "symbol": "VOO",
+            "isin": "US9229083632",
+            "country": "",
+            "source_file": "ibkr-russian-instrument-header.csv",
+            "source_row": 2,
+        }
+    ]
+
+
 def test_parse_optional_html_dividend_report_and_reconcile(tmp_path: Path) -> None:
     path = tmp_path / "dividends.html"
     path.write_text(

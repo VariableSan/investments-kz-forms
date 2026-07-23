@@ -15,6 +15,7 @@ def write_xlsx(report: TaxReport, path: str | Path) -> None:
     summary.title = "Summary"
     summary.append(["Form 270.01 input", "Amount", "Source rule line"])
     summary.append(["Status", report.status, "Human approval required"])
+    summary.append(["Input fingerprint", report.input_fingerprint, "SHA-256"])
     summary_rows = [
         ("Taxable dividends", report.taxable_dividends, report.rules.dividends_line),
         (
@@ -152,6 +153,8 @@ def write_markdown(report: TaxReport, path: str | Path) -> None:
         f"# Form 270.01 inputs for {report.year}",
         "",
         f"STATUS: {report.status}",
+        "",
+        f"Input fingerprint: {report.input_fingerprint}",
         "",
         f"Rules citation: {report.rules.citation}",
         "",

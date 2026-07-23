@@ -80,10 +80,11 @@ class TaxReport:
     declaration_items: tuple[DeclarationItem, ...]
     assets: tuple[dict[str, Any], ...]
     warnings: tuple[str, ...]
+    input_fingerprint: str = ""
 
     @property
     def status(self) -> str:
-        return "FINAL"
+        return "FINAL" if self.rules.approved else "DRAFT / NOT FOR FILING"
 
 
 def load_rules(path: str | Path, *, require_approved: bool = True) -> TaxRules:
@@ -185,8 +186,19 @@ def calculate_report(
     realized_rows = _convert_rows(realized, "realized_total", rate_provider)
     for row in realized_rows.to_dict("records"):
         values.append(_trace("realized_gain", row["realized_total"], row))
-    for row in f1042s_records.to_dict("records"):
+    f1042s_currency = f1042s_records.assign(currency="USD")
+    f1042s_rate_provider = (
+        rate_provider if getattr(rate_provider, "annual", False) else None
+    )
+    f1042s_gross_rows = _convert_rows(
+        f1042s_currency, "gross_income", f1042s_rate_provider
+    )
+    f1042s_withheld_rows = _convert_rows(
+        f1042s_currency, "federal_tax_withheld", f1042s_rate_provider
+    )
+    for row in f1042s_gross_rows.to_dict("records"):
         values.append(_trace("1042s_gross_income", row["gross_income"], row))
+    for row in f1042s_withheld_rows.to_dict("records"):
         values.append(
             _trace("1042s_federal_tax_withheld", row["federal_tax_withheld"], row)
         )
@@ -196,9 +208,9 @@ def calculate_report(
     ]
     if not non_dividend_records.empty:
         review_rows = non_dividend_records.assign(currency="USD")
-        for row in _convert_rows(review_rows, "gross_income", rate_provider).to_dict(
-            "records"
-        ):
+        for row in _convert_rows(
+            review_rows, "gross_income", f1042s_rate_provider
+        ).to_dict("records"):
             declaration_items.append(
                 DeclarationItem(
                     label=f"1042-S income code {str(row['income_code']).zfill(2)}",
@@ -225,6 +237,7 @@ def calculate_report(
 
     dividend_f1042s = _dividend_1042s_records(f1042s_records)
     f1042s_gross = _sum(f1042s_records, "gross_income")
+    withheld_usd = Decimal("0")
     withheld = Decimal("0")
     warnings: list[str] = []
     if f1042s_records.empty:
@@ -233,13 +246,19 @@ def calculate_report(
             "is not applied as a foreign tax credit."
         )
     else:
-        withheld = abs(_sum(dividend_f1042s, "federal_tax_withheld"))
+        withheld_usd = abs(_sum(dividend_f1042s, "federal_tax_withheld"))
+        withheld = abs(
+            _sum(
+                f1042s_withheld_rows.loc[dividend_f1042s.index],
+                "federal_tax_withheld",
+            )
+        )
         warnings.extend(
             _reconciliation_warnings(
                 source_dividend_total,
-                abs(source_withholding_total),
+                source_withholding_total,
                 f1042s_gross,
-                withheld,
+                withheld_usd,
             )
         )
     warnings.extend(_non_dividend_1042s_warnings(f1042s_records))
@@ -420,7 +439,7 @@ def _non_dividend_1042s_warnings(records: pd.DataFrame) -> list[str]:
 
 def _reconciliation_warnings(
     ibkr_income: Decimal,
-    ibkr_withheld: Decimal,
+    ibkr_withheld_net: Decimal,
     f1042s_gross: Decimal,
     f1042s_withheld: Decimal,
 ) -> list[str]:
@@ -430,10 +449,11 @@ def _reconciliation_warnings(
             "1042-S gross income does not reconcile with IBKR income: "
             f"IBKR {ibkr_income}, 1042-S total gross income {f1042s_gross}."
         )
-    if ibkr_withheld != f1042s_withheld:
+    if abs(ibkr_withheld_net) != f1042s_withheld:
         warnings.append(
             "1042-S federal tax withheld does not reconcile with IBKR withholding: "
-            f"IBKR aggregate {ibkr_withheld}, 1042-S code 06 {f1042s_withheld}; "
-            "these are different scopes, so the 1042-S amount is used for credit."
+            f"IBKR net {ibkr_withheld_net} USD, 1042-S code 06 "
+            f"{f1042s_withheld} USD; reversals may be present in IBKR detail. "
+            "The 1042-S amount is used for credit."
         )
     return warnings

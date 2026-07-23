@@ -8,6 +8,14 @@ from kz_tax_report.tax_engine import RulesError, calculate_report, load_rules
 from kz_tax_report.config import get_rules_path
 
 
+class FixedAnnualRates:
+    annual = True
+
+    def get_rate(self, rate_date: str, currency: str) -> Decimal:
+        assert currency == "USD"
+        return Decimal("521.59")
+
+
 def test_calculate_report_keeps_provenance_and_reconciles_sources(
     tmp_path: Path,
 ) -> None:
@@ -106,6 +114,89 @@ income:
     assert result.values[0].source_file == "activity.csv"
     assert result.values[0].source_row == 12
     assert any("1042-S gross income" in warning for warning in result.warnings)
+
+
+def test_1042s_foreign_tax_credit_is_converted_to_kzt(
+    tmp_path: Path,
+) -> None:
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(
+        """
+year: 2025
+approved: true
+citation: Synthetic approved rule for tests
+tax:
+  rate: '0.10'
+  foreign_tax_credit: true
+income:
+  dividends_line: '270.01.01'
+  realized_gains_line: '270.01.02'
+  exempt_gains_line: '270.01.03'
+""",
+        encoding="utf-8",
+    )
+    sections = {
+        "Дивиденды": pd.DataFrame(
+            [
+                {
+                    "currency": "USD",
+                    "date": "2025-02-01",
+                    "description": "ACME dividend",
+                    "amount": 1000,
+                    "source_file": "activity.csv",
+                    "source_row": 12,
+                }
+            ]
+        ),
+        "Удерживаемый налог": pd.DataFrame(
+            columns=[
+                "currency",
+                "date",
+                "description",
+                "amount",
+                "source_file",
+                "source_row",
+            ]
+        ),
+        "Реализованная и нереализованная П/У: отчет об эффективности": pd.DataFrame(
+            columns=[
+                "asset_class",
+                "symbol",
+                "realized_total",
+                "source_file",
+                "source_row",
+            ]
+        ),
+    }
+    report = calculate_report(
+        year=2025,
+        rules=load_rules(rules_path),
+        ibkr_sections=sections,
+        freedom_transactions=pd.DataFrame(columns=["transaction_type", "profit"]),
+        f1042s_records=pd.DataFrame(
+            [
+                {
+                    "income_code": "06",
+                    "gross_income": Decimal("100"),
+                    "federal_tax_withheld": Decimal("46"),
+                    "source_file": "1042-s.pdf",
+                    "source_page": 1,
+                    "source_row": 3,
+                }
+            ]
+        ),
+        rate_provider=FixedAnnualRates(),
+    )
+
+    assert report.foreign_tax_credit == Decimal("23993.14")
+    withheld = next(
+        value
+        for value in report.values
+        if value.category == "1042s_federal_tax_withheld"
+    )
+    assert withheld.currency == "USD"
+    assert withheld.foreign_amount == Decimal("46.00")
+    assert withheld.fx_rate == Decimal("521.59")
 
 
 def test_reconciliation_uses_total_1042s_income_and_normalizes_withholding_sign(

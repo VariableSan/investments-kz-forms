@@ -164,7 +164,9 @@ def test_missing_sale_date_fails_instead_of_guessing(tmp_path: Path) -> None:
         )
 
 
-def test_report_has_paste_sheet_and_final_status(tmp_path: Path) -> None:
+def test_report_has_paste_sheet_and_draft_status_for_unapproved_rules(
+    tmp_path: Path,
+) -> None:
     report = calculate_report(
         year=2025,
         rules=load_rules(rules_file(tmp_path), require_approved=False),
@@ -179,5 +181,4 @@ def test_report_has_paste_sheet_and_final_status(tmp_path: Path) -> None:
     workbook = load_workbook(output, read_only=True)
 
     assert "Copy into Form 270.01" in workbook.sheetnames
-    assert workbook["Summary"]["B2"].value == "FINAL"
-    assert not any("must not be filed" in warning for warning in report.warnings)
+    assert workbook["Summary"]["B2"].value == "DRAFT / NOT FOR FILING"

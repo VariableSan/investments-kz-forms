@@ -34,7 +34,7 @@ run:
 	uv run kz-tax-report --year $(YEAR) --ibkr $(IBKR) --freedom $(FREEDOM) --annual-rates $(ANNUAL_RATES) $(if $(F1042S),--f1042s $(F1042S),) --out $(OUT)
 
 web:
-	uv run kz-tax-report-ui
+	set -a; [ ! -f .env ] || . ./.env; set +a; exec uv run kz-tax-report-ui
 
 docker-build:
 	docker build -t kz-tax-report:local .
