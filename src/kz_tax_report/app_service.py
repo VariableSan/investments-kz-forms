@@ -9,6 +9,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import uuid4
 
+import pandas as pd
+
 from kz_tax_report.annual_rates import AnnualRateProvider
 from kz_tax_report.config import (
     get_app_mode,
@@ -21,7 +23,7 @@ from kz_tax_report.config import (
     get_rules_path,
 )
 from kz_tax_report.f1042s_parser import parse_f1042s
-from kz_tax_report.freedom_parser import parse_freedom_report
+from kz_tax_report.freedom_parser import parse_freedom_statement
 from kz_tax_report.ibkr_parser import parse_activity_statement
 from kz_tax_report.report_builder import write_markdown, write_xlsx
 from kz_tax_report.tax_engine import TaxReport, calculate_report, load_rules
@@ -141,6 +143,60 @@ class ArtifactJobManager:
             raise InputValidationError("Artifact job not found") from error
         return self.get(job_id, str(metadata.get("owner", "")))
 
+    def mark_completed(
+        self,
+        job: ArtifactJob,
+        *,
+        year: int,
+        summary: dict[str, str],
+        snapshot: dict[str, object] | None = None,
+    ) -> None:
+        """Record a completed report without retaining uploaded source files."""
+
+        metadata = json.loads(job.metadata_path.read_text(encoding="utf-8"))
+        metadata.update(
+            {
+                "completed": True,
+                "year": year,
+                "summary": summary,
+                "snapshot": snapshot,
+            }
+        )
+        job.metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        job.metadata_path.chmod(0o600)
+
+    def list_completed(self, owner: str) -> list[dict[str, object]]:
+        """Return completed reports owned by the authenticated browser user."""
+
+        self.cleanup_expired()
+        history: list[dict[str, object]] = []
+        for metadata_path in self.policy.root.glob("*/metadata.json"):
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if metadata.get("owner") != owner or metadata.get("completed") is not True:
+                continue
+            job_id = metadata_path.parent.name
+            if not all(
+                (metadata_path.parent / filename).is_file()
+                for filename in ("form-270-report.xlsx", "form-270-report.md")
+            ):
+                continue
+            snapshot = metadata.get("snapshot")
+            if not _is_result_snapshot(snapshot):
+                continue
+            history.append(
+                {
+                    "job_id": job_id,
+                    "created_at": float(metadata.get("created_at", 0)),
+                    "year": int(metadata.get("year", 0)),
+                    "summary": metadata.get("summary", {}),
+                    "snapshot": snapshot,
+                }
+            )
+        return sorted(history, key=lambda item: float(item["created_at"]), reverse=True)
+
     def cleanup_expired(self, now: float | None = None) -> tuple[str, ...]:
         cutoff = (time.time() if now is None else now) - self.policy.ttl_seconds
         removed: list[str] = []
@@ -178,6 +234,13 @@ class ArtifactJobManager:
         job.metadata_path.chmod(0o600)
 
 
+def _is_result_snapshot(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    required = {"year", "metrics", "declaration_rows", "asset_rows", "warnings"}
+    return required.issubset(value) and isinstance(value["year"], int)
+
+
 @dataclass(frozen=True)
 class CalculationArtifacts:
     """Generated files and the in-memory report for one calculation."""
@@ -190,8 +253,8 @@ class CalculationArtifacts:
 class CalculationWorkspace:
     """Own uploaded inputs and generated reports for one isolated session."""
 
-    REQUIRED_INPUTS = ("activity.csv", "freedom.pdf", "annual-rates.xlsx")
-    OPTIONAL_INPUTS = ("f1042s.pdf",)
+    REQUIRED_INPUTS = ("activity.csv", "annual-rates.xlsx")
+    OPTIONAL_INPUTS = ("freedom.pdf", "f1042s.pdf")
 
     def __init__(
         self,
@@ -263,7 +326,11 @@ class CalculationWorkspace:
         report = calculate_files(
             year=year,
             ibkr_path=self.root / "activity.csv",
-            freedom_path=self.root / "freedom.pdf",
+            freedom_path=(
+                self.root / "freedom.pdf"
+                if (self.root / "freedom.pdf").is_file()
+                else None
+            ),
             annual_rates_path=self.root / "annual-rates.xlsx",
             f1042s_path=(
                 self.root / "f1042s.pdf"
@@ -275,6 +342,8 @@ class CalculationWorkspace:
             rules_path=rules_path,
             auto_fill_isin=auto_fill_isin,
         )
+        for input_name in (*self.REQUIRED_INPUTS, *self.OPTIONAL_INPUTS):
+            (self.root / input_name).unlink(missing_ok=True)
         return CalculationArtifacts(
             report, self.root / "form-270-report.xlsx", self.root / "form-270-report.md"
         )
@@ -328,11 +397,11 @@ def calculate_files(
     *,
     year: int,
     ibkr_path: str | Path,
-    freedom_path: str | Path,
     annual_rates_path: str | Path,
-    f1042s_path: str | Path | None = None,
     xlsx_path: str | Path,
     markdown_path: str | Path,
+    freedom_path: str | Path | None = None,
+    f1042s_path: str | Path | None = None,
     rules_path: str | Path | None = None,
     rate_provider: AnnualRateProvider | None = None,
     auto_fill_isin: bool = False,
@@ -340,11 +409,40 @@ def calculate_files(
     """Calculate and write a report from broker files and an annual-rate workbook."""
 
     selected_rules_path = Path(rules_path or get_rules_path(year))
+    freedom_statement = (
+        parse_freedom_statement(freedom_path)
+        if freedom_path is not None and Path(freedom_path).is_file()
+        else None
+    )
     report = calculate_report(
         year=year,
         rules=load_rules(selected_rules_path, require_approved=False),
         ibkr_sections=parse_activity_statement(ibkr_path),
-        freedom_transactions=parse_freedom_report(freedom_path),
+        freedom_transactions=(
+            freedom_statement.transactions
+            if freedom_statement is not None
+            else pd.DataFrame(
+                columns=[
+                    "date",
+                    "transaction_type",
+                    "symbol",
+                    "deal_number",
+                    "quantity",
+                    "profit",
+                    "details",
+                    "source_file",
+                    "source_page",
+                    "source_table",
+                    "source_row",
+                ]
+            )
+        ),
+        freedom_closing_position=(
+            freedom_statement.closing_position
+            if freedom_statement is not None
+            else None
+        ),
+        freedom_report_uploaded=freedom_statement is not None,
         f1042s_records=(
             parse_f1042s(f1042s_path)
             if f1042s_path is not None and Path(f1042s_path).is_file()

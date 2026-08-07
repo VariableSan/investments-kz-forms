@@ -103,6 +103,17 @@ income:
         ibkr_sections=sections,
         freedom_transactions=freedom,
         f1042s_records=f1042s,
+        freedom_closing_position={
+            "asset_class": "ETN",
+            "symbol": "",
+            "isin": "KZX000002001",
+            "quantity": Decimal("12"),
+            "currency": "USD",
+            "country": "",
+            "source_file": "freedom.pdf",
+            "source_page": 1,
+            "source_row": 1,
+        },
     )
 
     assert result.taxable_dividends == Decimal("100")
@@ -113,7 +124,98 @@ income:
     assert result.tax_due == Decimal("7")
     assert result.values[0].source_file == "activity.csv"
     assert result.values[0].source_row == 12
-    assert any("1042-S gross income" in warning for warning in result.warnings)
+    assert any(
+        "Валовой доход по форме 1042-S" in warning for warning in result.warnings
+    )
+    assert result.assets[-1] == {
+        "asset_class": "ETN",
+        "currency": "USD",
+        "symbol": "",
+        "quantity": Decimal("12"),
+        "isin": "KZX000002001",
+        "country": "",
+        "source_file": "freedom.pdf",
+        "source_page": 1,
+        "source_row": 1,
+    }
+
+
+def test_zero_quantity_freedom_position_keeps_isin_metadata_without_asset(
+    tmp_path: Path,
+) -> None:
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(
+        """
+year: 2025
+approved: true
+citation: Synthetic approved rule for tests
+tax:
+  rate: '0.10'
+  foreign_tax_credit: true
+income:
+  dividends_line: '270.01.01'
+  realized_gains_line: '270.01.02'
+  exempt_gains_line: '270.01.03'
+""",
+        encoding="utf-8",
+    )
+    empty_sections = {
+        "Дивиденды": pd.DataFrame(
+            columns=[
+                "currency",
+                "date",
+                "amount",
+                "description",
+                "source_file",
+                "source_row",
+            ]
+        ),
+        "Удерживаемый налог": pd.DataFrame(
+            columns=[
+                "currency",
+                "date",
+                "amount",
+                "description",
+                "source_file",
+                "source_row",
+            ]
+        ),
+        "Реализованная и нереализованная П/У: отчет об эффективности": pd.DataFrame(
+            columns=[
+                "asset_class",
+                "symbol",
+                "realized_total",
+                "source_file",
+                "source_row",
+            ]
+        ),
+    }
+
+    result = calculate_report(
+        year=2025,
+        rules=load_rules(rules_path),
+        ibkr_sections=empty_sections,
+        freedom_transactions=pd.DataFrame(columns=["transaction_type", "profit"]),
+        f1042s_records=pd.DataFrame(
+            columns=["income_code", "gross_income", "federal_tax_withheld"]
+        ),
+        freedom_report_uploaded=True,
+        freedom_closing_position={
+            "asset_class": "ETN",
+            "symbol": "",
+            "isin": "KZX000002001",
+            "quantity": Decimal("0"),
+            "currency": "USD",
+            "country": "",
+            "source_file": "freedom.pdf",
+            "source_page": 1,
+            "source_row": 1,
+        },
+    )
+
+    assert result.freedom_report_uploaded is True
+    assert result.freedom_isin == "KZX000002001"
+    assert result.assets == ()
 
 
 def test_1042s_foreign_tax_credit_is_converted_to_kzt(
@@ -286,13 +388,13 @@ income:
 
     assert result.foreign_tax_credit == Decimal("8")
     assert any(
-        "gross income does not reconcile" in warning for warning in result.warnings
+        "Валовой доход по форме 1042-S" in warning for warning in result.warnings
     )
     assert not any(
-        "federal tax withheld does not reconcile" in warning
+        "Удержанный федеральный налог по форме 1042-S" in warning
         for warning in result.warnings
     )
-    assert any("income code 01" in warning for warning in result.warnings)
+    assert any("Код дохода 01 формы 1042-S" in warning for warning in result.warnings)
 
 
 def test_reconciliation_ignores_sub_dollar_gross_rounding_difference(
@@ -377,7 +479,7 @@ income:
     )
 
     assert not any(
-        "gross income does not reconcile" in warning for warning in report.warnings
+        "Валовой доход по форме 1042-S" in warning for warning in report.warnings
     )
 
 

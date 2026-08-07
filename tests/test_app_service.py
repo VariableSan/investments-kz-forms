@@ -38,8 +38,18 @@ def test_workspace_validation_reports_missing_inputs(tmp_path: Path) -> None:
     workspace = CalculationWorkspace(tmp_path / "session")
     workspace.save_upload("activity.csv", b"csv")
 
-    with pytest.raises(InputValidationError, match="freedom.pdf"):
+    with pytest.raises(InputValidationError, match="annual-rates.xlsx"):
         workspace.validate_inputs(2025)
+
+
+def test_workspace_validation_does_not_require_optional_freedom_or_1042s(
+    tmp_path: Path,
+) -> None:
+    workspace = CalculationWorkspace(tmp_path / "session")
+    workspace.save_upload("activity.csv", b"csv")
+    workspace.save_upload("annual-rates.xlsx", b"rates")
+
+    workspace.validate_inputs(2025)
 
 
 def test_workspace_validation_checks_explicit_session_rules_path(
@@ -88,6 +98,61 @@ def test_artifact_jobs_are_opaque_and_owner_bound(tmp_path: Path) -> None:
     assert loaded.workspace.root == job.workspace.root
     with pytest.raises(InputValidationError, match="ownership"):
         manager.get(job.job_id, "connection-b")
+
+
+def test_completed_artifact_history_is_owner_bound_and_contains_result_summary(
+    tmp_path: Path,
+) -> None:
+    manager = ArtifactJobManager(
+        ArtifactPolicy(root=tmp_path / "jobs", mode="local", ttl_seconds=60)
+    )
+    first = manager.create("connection-a")
+    second = manager.create("connection-b")
+    manager.mark_completed(
+        first,
+        year=2025,
+        summary={"tax_due": "123.45", "taxable_dividends": "678.90"},
+        snapshot={
+            "year": 2025,
+            "metrics": [],
+            "declaration_rows": [],
+            "asset_rows": [],
+            "warnings": ["Проверка"],
+        },
+    )
+    for filename in ("form-270-report.xlsx", "form-270-report.md"):
+        (first.workspace.root / filename).write_bytes(b"fixture")
+    manager.mark_completed(second, year=2024, summary={"tax_due": "9.00"})
+
+    history = manager.list_completed("connection-a")
+
+    assert [item["job_id"] for item in history] == [first.job_id]
+    assert history[0]["year"] == 2025
+    assert history[0]["summary"] == {
+        "tax_due": "123.45",
+        "taxable_dividends": "678.90",
+    }
+    assert history[0]["snapshot"] == {
+        "year": 2025,
+        "metrics": [],
+        "declaration_rows": [],
+        "asset_rows": [],
+        "warnings": ["Проверка"],
+    }
+
+
+def test_completed_history_ignores_invalid_result_snapshot(tmp_path: Path) -> None:
+    manager = ArtifactJobManager(
+        ArtifactPolicy(root=tmp_path / "jobs", mode="local", ttl_seconds=60)
+    )
+    job = manager.create("owner")
+    manager.mark_completed(job, year=2025, summary={}, snapshot={"warnings": []})
+    for filename in ("form-270-report.xlsx", "form-270-report.md"):
+        (job.workspace.root / filename).write_bytes(b"fixture")
+
+    history = manager.list_completed("owner")
+
+    assert history == []
 
 
 def test_artifact_jobs_expire_without_touching_other_jobs(tmp_path: Path) -> None:

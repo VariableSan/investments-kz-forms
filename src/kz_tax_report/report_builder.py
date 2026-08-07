@@ -195,12 +195,12 @@ def write_markdown(report: TaxReport, path: str | Path) -> None:
             "",
             "## Copy into Form 270.04",
             "",
-            "| Asset class | Symbol | ISIN | Quantity | Country | Source |",
-            "| --- | --- | --- | ---: | --- | --- |",
+            "| Asset class | Symbol | ISIN | Quantity | Country | Currency | Source |",
+            "| --- | --- | --- | ---: | --- | --- | --- |",
         ]
     )
     lines.extend(
-        f"| {asset.get('asset_class', '')} | {asset.get('symbol', '')} | {asset.get('isin', '')} | {asset.get('quantity', '')} | {asset.get('country', '')} | {asset.get('source_file', '')}:{asset.get('source_row', '')} |"
+        f"| {asset.get('asset_class', '')} | {asset.get('symbol', '')} | {asset.get('isin', '')} | {asset.get('quantity', '')} | {asset.get('country', '')} | {asset.get('currency', '')} | {asset.get('source_file', '')}:{asset.get('source_row', '')} |"
         for asset in report.assets
     )
     lines.extend(["", "## Warnings", ""])

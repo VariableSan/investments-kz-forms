@@ -80,6 +80,8 @@ class TaxReport:
     declaration_items: tuple[DeclarationItem, ...]
     assets: tuple[dict[str, Any], ...]
     warnings: tuple[str, ...]
+    freedom_report_uploaded: bool = False
+    freedom_isin: str = ""
     input_fingerprint: str = ""
 
     @property
@@ -153,6 +155,8 @@ def calculate_report(
     f1042s_records: pd.DataFrame | None,
     rate_provider: Any | None = None,
     auto_fill_isin: bool = False,
+    freedom_report_uploaded: bool = False,
+    freedom_closing_position: dict[str, Any] | None = None,
 ) -> TaxReport:
     """Calculate tax inputs while retaining a source reference for every value."""
 
@@ -169,6 +173,14 @@ def calculate_report(
         if "Открытые позиции" in ibkr_sections
         else pd.DataFrame()
     )
+    if (
+        freedom_closing_position is not None
+        and _decimal(
+            freedom_closing_position.get("quantity", 0), "Freedom closing quantity"
+        )
+        != 0
+    ):
+        assets = pd.concat([assets, pd.DataFrame([freedom_closing_position])])
     freedom_transactions = _filter_year(freedom_transactions, year)
     f1042s_records = _filter_year(
         f1042s_records if f1042s_records is not None else _empty_1042s(),
@@ -213,11 +225,11 @@ def calculate_report(
         ).to_dict("records"):
             declaration_items.append(
                 DeclarationItem(
-                    label=f"1042-S income code {str(row['income_code']).zfill(2)}",
+                    label=f"Код дохода формы 1042-S {str(row['income_code']).zfill(2)}",
                     amount=_money(_decimal(row["gross_income"], "gross_income")),
                     form_line="manual",
-                    status="manual classification required",
-                    note="Shown for review; excluded from dividend tax and foreign tax credit.",
+                    status="требуется ручная классификация",
+                    note="Показано для проверки; исключено из налога на дивиденды и иностранного налогового кредита.",
                     source_file=str(row["source_file"]),
                     source_row=int(row["source_row"]),
                 )
@@ -242,8 +254,8 @@ def calculate_report(
     warnings: list[str] = []
     if f1042s_records.empty:
         warnings.append(
-            "1042-S was not provided; IBKR withholding is shown for reference and "
-            "is not applied as a foreign tax credit."
+            "Форма 1042-S не предоставлена; удержание IBKR показано для справки и "
+            "не применяется как иностранный налоговый кредит."
         )
     else:
         withheld_usd = abs(_sum(dividend_f1042s, "federal_tax_withheld"))
@@ -281,6 +293,12 @@ def calculate_report(
         declaration_items=tuple(declaration_items),
         assets=tuple(assets.to_dict("records")),
         warnings=tuple(warnings),
+        freedom_report_uploaded=freedom_report_uploaded,
+        freedom_isin=(
+            str(freedom_closing_position.get("isin", ""))
+            if freedom_report_uploaded and freedom_closing_position is not None
+            else ""
+        ),
     )
 
 
@@ -431,8 +449,8 @@ def _non_dividend_1042s_warnings(records: pd.DataFrame) -> list[str]:
         }
     )
     return [
-        f"1042-S income code {code} is not included in the dividend calculation "
-        "and requires manual review."
+        f"Код дохода {code} формы 1042-S не включён в расчёт дивидендов "
+        "и требует ручной проверки."
         for code in codes
     ]
 
@@ -446,14 +464,14 @@ def _reconciliation_warnings(
     warnings: list[str] = []
     if abs(ibkr_income - f1042s_gross) > _GROSS_RECONCILIATION_TOLERANCE:
         warnings.append(
-            "1042-S gross income does not reconcile with IBKR income: "
-            f"IBKR {ibkr_income}, 1042-S total gross income {f1042s_gross}."
+            "Валовой доход по форме 1042-S не сходится с доходом IBKR: "
+            f"IBKR {ibkr_income}, общий валовой доход 1042-S {f1042s_gross}."
         )
     if abs(ibkr_withheld_net) != f1042s_withheld:
         warnings.append(
-            "1042-S federal tax withheld does not reconcile with IBKR withholding: "
-            f"IBKR net {ibkr_withheld_net} USD, 1042-S code 06 "
-            f"{f1042s_withheld} USD; reversals may be present in IBKR detail. "
-            "The 1042-S amount is used for credit."
+            "Удержанный федеральный налог по форме 1042-S не сходится с удержанием IBKR: "
+            f"IBKR нетто {ibkr_withheld_net} USD, форма 1042-S, код 06, "
+            f"{f1042s_withheld} USD; в деталях IBKR могут быть обратные операции. "
+            "Для кредита используется сумма из формы 1042-S."
         )
     return warnings

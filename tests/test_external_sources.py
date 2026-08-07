@@ -5,7 +5,7 @@ import pytest
 
 from kz_tax_report.f1042s_parser import parse_f1042s
 from kz_tax_report.fifo import FifoError, match_fifo
-from kz_tax_report.freedom_parser import parse_freedom_report
+from kz_tax_report.freedom_parser import parse_freedom_report, parse_freedom_statement
 
 
 class FakePage:
@@ -134,6 +134,46 @@ def test_parse_freedom_table_preserves_table_row_provenance(
             "source_row": 2,
         }
     ]
+
+
+def test_parse_freedom_statement_extracts_closing_asset_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "freedom.pdf"
+    path.touch()
+    pdf = FakePdf(
+        [
+            FakePage(
+                "АО Freedom Bank Казахстан\n"
+                "Вид ценной бумаги: ETN\n"
+                "Валюта счета: USD\n"
+                "ISIN: KZX000002001\n"
+                "Доступно на 31.12.25 12 267.04 $ 134196.63 ₸",
+                tables=[
+                    [
+                        ["Дата", "Операция", "Количество", "Прибыль"],
+                        ["01.02.2025", "Продажа", "2", "10.50"],
+                    ]
+                ],
+            )
+        ]
+    )
+    monkeypatch.setattr("kz_tax_report.freedom_parser.pdfplumber.open", lambda _: pdf)
+
+    statement = parse_freedom_statement(path)
+
+    assert statement.transactions.to_dict("records")[0]["profit"] == Decimal("10.50")
+    assert statement.closing_position == {
+        "asset_class": "ETN",
+        "symbol": "",
+        "isin": "KZX000002001",
+        "quantity": Decimal("12"),
+        "currency": "USD",
+        "country": "",
+        "source_file": "freedom.pdf",
+        "source_page": 1,
+        "source_row": 1,
+    }
 
 
 def test_parse_freedom_report_skips_summary_tables_and_accepts_ledger_without_ticker(

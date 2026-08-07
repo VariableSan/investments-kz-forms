@@ -12,7 +12,9 @@ app = typer.Typer(no_args_is_help=True)
 @app.callback()
 def run(
     ibkr: Path = typer.Option(..., exists=True, readable=True, help="IBKR CSV"),  # noqa: B008
-    freedom: Path = typer.Option(..., exists=True, readable=True, help="Freedom PDF"),  # noqa: B008
+    freedom: Path | None = typer.Option(  # noqa: B008
+        None, exists=True, readable=True, help="Optional Freedom PDF"
+    ),
     annual_rates: Path = typer.Option(  # noqa: B008
         ..., "--annual-rates", exists=True, readable=True, help="NBK annual-rate XLSX"
     ),

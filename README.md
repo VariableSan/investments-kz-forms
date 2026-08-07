@@ -1,54 +1,78 @@
-# Kazakhstan Investment Tax Declaration Tool
+# Инструмент подготовки налоговой декларации Казахстана
 
-Local-first Python 3.12 tooling for preparing traceable inputs for Kazakhstan
-Form 270.00 / Appendix 270.01 from IBKR and Freedom Bank reports.
+## Содержание
 
-The project provides both a CLI and a local NiceGUI browser workflow. Both
-paths use the same parsers and report model. The browser workflow assigns each
-connection an opaque, owner-bound job directory with restrictive permissions.
-Jobs are cleaned up by a configurable TTL so downloads are not invalidated by
-browser disconnects. Rules edited in the browser are session-only and are
-never written back to the bundled YAML.
+- [Лицензия и отказ от ответственности](#лицензия-и-отказ-от-ответственности)
+- [Граница конфиденциальности](#граница-конфиденциальности)
+- [Предварительные требования](#предварительные-требования)
+- [Разработка и проверки](#разработка-и-проверки)
+- [Поддерживаемые отчёты](#поддерживаемые-отчёты)
+- [CLI](#cli)
+- [Пакетный запуск Docker](#пакетный-запуск-docker)
+- [Запуск для обычного пользователя](#запуск-для-обычного-пользователя)
+	- [1. Установите Docker Desktop](#1-установите-docker-desktop)
+	- [2. Скачайте проект](#2-скачайте-проект)
+	- [3. Запустите приложение](#3-запустите-приложение)
+	- [4. Откройте приложение](#4-откройте-приложение)
+	- [5. Остановите приложение](#5-остановите-приложение)
+	- [6. Удалите временные файлы и место, занятое Docker](#6-удалите-временные-файлы-и-место-занятое-docker)
+	- [Hosted-профиль только по приглашениям](#hosted-профиль-только-по-приглашениям)
+	- [Compose-файл для Dokploy](#compose-файл-для-dokploy)
+- [Браузерный интерфейс](#браузерный-интерфейс)
+- [Отказ от налоговых рекомендаций](#отказ-от-налоговых-рекомендаций)
 
-## License And Disclaimer
+Локальный инструмент на Python 3.12 для подготовки проверяемых данных к форме
+270.00 и приложению 270.01 по отчётам IBKR и Freedom Bank.
 
-This project is available under the PolyForm Noncommercial License 1.0.0. It
-is source-available and may not be used for commercial purposes; it is not an
-OSI-certified open-source license. The software is calculation assistance, not
-tax or legal advice. Verify every source, rule, form line, and final declaration
-before filing. The author and operator accept no responsibility for filing
-correctness.
+Проект предоставляет CLI и локальный браузерный интерфейс NiceGUI. Оба режима
+используют одни и те же парсеры и модель отчёта. Для каждого подключения
+создаётся непрозрачный каталог с ограниченными правами доступа. Завершённые
+расчёты доступны во вкладке «История» в течение настроенного срока хранения.
+Правила, изменённые в браузере, действуют только в текущей сессии и не
+перезаписывают встроенный YAML-файл.
 
-The optional ISIN prefill reads only exact matches from the uploaded IBKR
-report. It makes no external requests. Missing or ambiguous values require
-manual completion. The application never submits a declaration electronically.
+## Лицензия и отказ от ответственности
 
-## Privacy Boundary
+Проект распространяется по лицензии PolyForm Noncommercial License 1.0.0. Это
+доступный для просмотра исходный код, но не одобренное OSI открытое ПО.
+Коммерческое использование запрещено, если иное отдельно не разрешено
+правообладателем. Программа помогает подготовить расчёт и не является
+налоговой или юридической консультацией. Перед подачей проверьте каждый
+источник, нормативное правило, строку формы и итоговую декларацию. Автор и
+оператор не несут ответственности за корректность подачи.
 
-Brokerage reports contain financial data and personal identifiers. Keep real
-reports under `data/`, which is excluded from Git and Docker build contexts.
-Only synthetic, de-identified fixtures may be committed under `tests/fixtures`.
-This project never submits data to a tax authority or stores it in the cloud.
+Автоматическое заполнение ISIN использует только точные совпадения в
+загруженном отчёте IBKR и не выполняет внешних запросов. Пропущенные и
+неоднозначные значения нужно проверить вручную. Электронная отправка декларации
+не поддерживается.
 
-## Prerequisites
+## Граница конфиденциальности
+
+Брокерские отчёты содержат финансовые данные и персональные идентификаторы.
+Храните реальные отчёты в `data/`, исключённом из Git и контекста сборки
+Docker. В `tests/fixtures` можно добавлять только синтетические и обезличенные
+данные. Проект не отправляет данные в налоговые органы и не сохраняет их в
+облаке.
+
+## Предварительные требования
 
 - Python 3.12
 - `uv`
-- Docker and Docker Compose are optional for batch execution
+- Docker и Docker Compose нужны только для контейнерного запуска
 
 ```bash
 uv sync
 uv run python --version
 ```
 
-## TDD And Ruff Workflow
+## Разработка и проверки
 
-Every behavior change follows a red-green-refactor loop:
+Изменения разрабатываются через цикл TDD:
 
-1. Write one focused failing pytest test using synthetic fixture data.
-2. Implement the smallest production change that makes it pass.
-3. Run the focused test, then the complete suite.
-4. Run Ruff lint and the non-mutating formatter check.
+1. Добавьте узкий падающий pytest-тест на синтетических данных.
+2. Реализуйте минимальное изменение production-кода.
+3. Запустите узкий тест, затем весь набор тестов.
+4. Запустите Ruff для проверки стиля и форматирования.
 
 ```bash
 make test
@@ -56,80 +80,79 @@ make lint
 make format-check
 ```
 
-`make format` and `make lint-fix` are explicit mutating commands. Ruff is
-configured in `pyproject.toml`, targets Python 3.12, and is the single project
-formatter and linter.
+`make format` и `make lint-fix` изменяют файлы намеренно. Ruff настроен в
+`pyproject.toml`, работает с Python 3.12 и является единым форматтером и
+линтером проекта.
 
-## Available Reports
+## Поддерживаемые отчёты
 
-The local sample directory contains four observed report types:
+Проект поддерживает следующие типы отчётов:
 
-- IBKR Activity Statement CSV: primary source for dividends, withholding,
-	trades, positions, and IBKR's realized P&L section.
-- IBKR Dividend Report HTML: optional independent dividend cross-check.
-- IRS Form 1042-S PDF: foreign income and US withholding confirmation.
-- Freedom Bank brokerage PDF: ETN summary and transaction ledger.
+- CSV IBKR Activity Statement: дивиденды, удержания, сделки, позиции и готовая
+  прибыль/убыток IBKR.
+- HTML-отчёт IBKR по дивидендам: дополнительная независимая проверка.
+- PDF формы IRS 1042-S: подтверждение дохода и удержанного налога в США.
+- PDF брокерской выписки Freedom Bank: операции и итоговая позиция ETN.
 
-The CSV, annual-rate XLSX, and Freedom PDF are the required inputs. The 1042-S
-PDF is optional and enables reconciliation plus a foreign-tax-credit check.
-The HTML report is optional and must not be required for a normal run.
+CSV IBKR и XLSX со среднегодовыми курсами НБК обязательны. PDF Freedom Bank
+необязателен: при загрузке его операции и данные закрывающей позиции, включая
+валюту и ISIN, попадут в расчёт. PDF 1042-S также необязателен и включает
+сверку и проверку возможного иностранного налогового кредита. HTML-отчёт
+необязателен и не нужен для обычного запуска.
 
 ## CLI
 
-The CLI calculates a source-traceable report and writes both XLSX and Markdown
-outputs. The annual-rate workbook is downloaded manually from the official NBK
-page configured by `KZ_TAX_REPORT_NBK_DOWNLOAD_URL`:
+CLI создаёт проверяемый отчёт в форматах XLSX и Markdown. XLSX со среднегодовыми
+курсами скачивается вручную с официальной страницы НБК, указанной в
+`KZ_TAX_REPORT_NBK_DOWNLOAD_URL`:
 
 ```bash
 uv run kz-tax-report --ibkr path/to/activity.csv \
-	--freedom path/to/freedom.pdf \
 	--annual-rates path/to/2025-rates.xlsx \
 	--year 2025 \
 	--out output/report.xlsx
 ```
 
-Add `--f1042s path/to/1042s.pdf` when the form is available. Without it, IBKR
-withholding is shown as reference only and is not used as a foreign-tax credit.
-Generated reports include source-row provenance, annual-rate workbook
-provenance, 270.01 values, 270.04 asset preparation, input fingerprint, and
-warnings. Foreign tax credit amounts from 1042-S are converted from USD to KZT
-using the supplied annual-rate workbook before the configured cap is applied.
-No electronic filing is supported. Reports based on unapproved tax rules are
-marked `DRAFT / NOT FOR FILING`.
+При наличии добавьте `--f1042s path/to/1042s.pdf` и
+`--freedom path/to/freedom.pdf`. Без 1042-S удержание IBKR показывается только
+для справки и не используется как иностранный налоговый кредит. Отчёты
+содержат provenance исходных строк, сведения о файле курсов, значения 270.01,
+подготовку активов 270.04, отпечаток входных файлов и предупреждения. Суммы
+кредита из 1042-S переводятся из USD в KZT по загруженному XLSX до применения
+установленного ограничения. Электронная подача не поддерживается. Отчёты на
+основе неутверждённых правил помечаются `DRAFT / NOT FOR FILING`.
 
-## Docker Batch Mode
+## Пакетный запуск Docker
 
-The current Compose service is for CLI batch execution and mounts inputs
-read-only:
+Compose-сервис `app` предназначен для пакетного запуска и монтирует входные
+данные только для чтения:
 
 ```bash
 mkdir -p output
 docker compose run --rm app --help
 ```
 
-Runtime settings can be supplied through environment variables. Copy
-`example.env` to `.env` before using Docker Compose and adjust the values that
-depend on the deployment. The application keeps built-in fallback values when
-these variables are absent or empty. Explicit CLI options such as `--rules`
-still take precedence over environment settings.
+Настройки можно передать через переменные окружения. Скопируйте `example.env`
+в `.env` и измените значения для своего окружения. Если переменная не задана,
+используется встроенное значение. Явные параметры CLI, например `--rules`,
+имеют приоритет.
 
-The only NBK setting is `KZ_TAX_REPORT_NBK_DOWNLOAD_URL`; the application does
-not fetch or cache government rates. Browser artifact policy is controlled by
+Единственная настройка НБК — `KZ_TAX_REPORT_NBK_DOWNLOAD_URL`; приложение не
+скачивает и не кэширует государственные курсы. Политика хранения браузерных
+артефактов задаётся через
 `KZ_TAX_REPORT_ARTIFACT_DIR`, `KZ_TAX_REPORT_ARTIFACT_MODE`,
 `KZ_TAX_REPORT_ARTIFACT_TTL_SECONDS`, `KZ_TAX_REPORT_MAX_UPLOAD_BYTES`, and
-`KZ_TAX_REPORT_MAX_JOB_BYTES`. `INPUTS_HOST_DIR` and `OUTPUT_HOST_DIR` control
-the host-side Compose mounts.
+`KZ_TAX_REPORT_MAX_JOB_BYTES`. `INPUTS_HOST_DIR` и `OUTPUT_HOST_DIR` управляют
+подключениями каталогов хоста в Compose.
 
-The web UI may be published to the LAN without built-in authentication, as
-explicitly selected for this project. That deployment allows any reachable LAN
-peer to access uploaded PII and must never be treated as internet-safe.
-The local Docker web profile mounts `OUTPUT_HOST_DIR` at `/outputs`; after a
-successful calculation the UI both downloads the reports in the browser and
-writes collision-safe XLSX/Markdown copies to that mount. These copies contain
-financial data and should be removed according to your local retention policy.
+Веб-интерфейс можно опубликовать в LAN без встроенной аутентификации, но это
+осознанный риск: любой доступный узел сети получит доступ к загруженным PII.
+Такой режим нельзя считать безопасным для Интернета. Локальный Docker-профиль
+монтирует `OUTPUT_HOST_DIR` в `/outputs`; после расчёта UI скачивает отчёты в
+браузер и сохраняет уникальные копии XLSX/Markdown в этом каталоге.
 
-For local Docker use, create the output directory before starting the service
-and make it writable by the image's non-root UID (`10001`):
+Для локального Docker создайте каталог output до запуска и разрешите запись для
+не-root UID образа (`10001`):
 
 ```bash
 mkdir -p output
@@ -137,45 +160,139 @@ chown 10001:10001 output
 make docker-web
 ```
 
-The `hosted` Compose profile intentionally has no host output mount. It streams
-browser downloads from TTL-managed job directories and removes expired jobs;
-it does not publish a static report directory. Start it with
-`docker compose --profile hosted up web-hosted` after setting every hosted
-variable in `.env`. The origin binds only to loopback so Cloudflare Tunnel (or
-an equivalent private reverse proxy) remains the only public ingress. Compose
-health checks probe `/healthz` every 30 seconds; the application root itself
-requires a valid Cloudflare Access token.
+Пользователи Docker Desktop могут запустить UI через
+`launchers/start-windows.bat`, `launchers/start-macos.command` или
+`launchers/start-linux.sh`. Локальный профиль привязан к `127.0.0.1` и не
+является публичным сервисом.
 
-### Invite-Only Hosted Profile
+## Запуск для обычного пользователя
 
-Set `KZ_TAX_REPORT_MODE=hosted`, the Access issuer, audience, JWKS URL,
-HTTPS public URL, a random session secret of at least 32 bytes,
-`KZ_TAX_REPORT_TRUST_PROXY=true`, and explicit positive TTL/upload limits. The
-process refuses to start when any of these values is missing or insecure.
-Cloudflare Access must enforce the invite-only email policy and pass its
-signed `CF_Authorization` cookie; the application also accepts a Bearer token
-for API-style clients. Unsigned identity headers and application passwords are
-not trusted.
+Ниже описан самый простой способ запуска. Программировать и устанавливать
+Python не нужно: приложение работает внутри Docker Desktop.
 
-Deploy the image pulled from GHCR through Dokploy, attach a Cloudflare Tunnel
-to the private container port, and keep the origin firewall closed. Store the
-issuer, audience, JWKS URL, public URL, session secret, and limits as Dokploy
-secrets/environment values, never in the image. Use the health check at
-`/healthz`. Jobs and reports are isolated by authenticated subject, deleted by
-TTL cleanup, and are not persisted to a host output mount. Initial delivery
-does not use R2: reports are streamed directly from the ephemeral job
-directory, which keeps the retention and authorization surface small.
+### 1. Установите Docker Desktop
 
-The server necessarily sees plaintext PDF and CSV contents while parsing. This
-is an intentional hosted risk, not a zero-knowledge design; only invited
-identities should be allowed through Access.
+Скачайте и установите **Docker Desktop** с официального сайта Docker. Запустите
+его и дождитесь, пока он покажет, что Docker работает. После этого Docker
+Desktop можно оставить запущенным на всё время работы с приложением.
 
-### Dokploy Compose File
+### 2. Скачайте проект
 
-For Dokploy, paste `docker-compose.prod.yml` into the Compose editor. The file
-pulls `ghcr.io/variablesan/investments-kz-forms:latest` by default; set
-`KZ_TAX_REPORT_IMAGE` when deploying a different tag. Add these values to the
-Dokploy environment/secrets before deploying:
+Скачайте проект архивом ZIP и распакуйте его в удобную папку. Внутри распакованной
+папки должны находиться файлы `docker-compose.yml`, `README.md` и папка
+`launchers`.
+
+Не отправляйте свои брокерские отчёты в GitHub и не храните их в облачной папке.
+Приложение работает с ними локально, поэтому лучше использовать обычную папку
+на компьютере.
+
+### 3. Запустите приложение
+
+Выберите свою операционную систему:
+
+- **Windows:** откройте папку `launchers` и дважды щёлкните
+	`start-windows.bat`.
+- **macOS:** откройте `start-macos.command` двойным щелчком. Если macOS не
+	разрешит запуск, нажмите по файлу правой кнопкой, выберите «Открыть» и ещё
+	раз подтвердите запуск.
+- **Linux:** откройте терминал в папке проекта и выполните
+	`./launchers/start-linux.sh`. Если система сообщает, что запуск запрещён,
+	выполните один раз `chmod +x launchers/start-linux.sh`, затем повторите
+	запуск.
+
+При первом запуске Docker скачает и соберёт необходимые компоненты. Это может
+занять несколько минут и потребовать несколько гигабайт свободного места.
+Окно терминала закрывать нельзя: в нём работает приложение.
+
+### 4. Откройте приложение
+
+Откройте браузер и перейдите по адресу
+[`http://127.0.0.1:8080`](http://127.0.0.1:8080). Загрузите в интерфейс CSV IBKR
+и XLSX со среднегодовыми курсами НБК. PDF Freedom Bank и PDF 1042-S можно
+добавить, если они у вас есть. После расчёта скачайте подготовленные файлы.
+
+### 5. Остановите приложение
+
+Вернитесь в окно, из которого запускали приложение, и нажмите `Ctrl+C`. Это
+остановит приложение, но оставит сохранённые файлы в папке `output/`.
+
+Если окно запуска было закрыто случайно, откройте терминал в папке проекта и
+выполните:
+
+```bash
+docker compose --profile web down
+```
+
+### 6. Удалите временные файлы и место, занятое Docker
+
+Сначала остановите приложение способом выше. Затем удалите папку `output/`,
+если подготовленные отчёты больше не нужны. В ней могут находиться XLSX и
+Markdown с персональными и финансовыми данными.
+
+Чтобы удалить контейнеры и локальный образ этого проекта, выполните в терминале
+из папки проекта:
+
+```bash
+docker compose --profile web down --rmi local --volumes --remove-orphans
+docker image rm kz-tax-report:local
+```
+
+Команда `docker image rm` может сообщить, что образ уже удалён. Это нормально.
+Эти команды удаляют ресурсы данного проекта, но не очищают другие Docker-образы
+на компьютере.
+
+Если нужно освободить ещё и общий кэш сборки Docker, выполните дополнительно:
+
+```bash
+docker builder prune
+```
+
+Docker покажет, сколько места будет освобождено, и попросит подтверждение.
+Кэш может использоваться другими проектами, поэтому соглашайтесь только если
+понимаете, что последующие Docker-сборки могут занять больше времени.
+
+После этого можно удалить саму распакованную папку проекта через Проводник
+Windows или Finder. Если вы хотите оставить проект для следующего запуска,
+удалять эту папку не нужно. Файлы в исходной папке `data/` сами по себе не
+удаляются, поэтому удалите их вручную, если там были настоящие отчёты.
+
+Профиль Compose `hosted` намеренно не подключает output-каталог хоста. Он
+отдаёт скачивания из job-каталогов с TTL и удаляет истёкшие job. Запуск:
+`docker compose --profile hosted up web-hosted` после настройки всех переменных
+в `.env`. Origin привязан только к loopback, поэтому Cloudflare Tunnel или
+другой закрытый reverse proxy остаётся единственной публичной точкой входа.
+Проверка Compose обращается к `/healthz` каждые 30 секунд, а корневой маршрут
+требует действительный токен Cloudflare Access.
+
+### Hosted-профиль только по приглашениям
+
+Задайте `KZ_TAX_REPORT_MODE=hosted`, issuer и audience Access, URL JWKS,
+публичный HTTPS-адрес, случайный секрет с длиной не менее 32 байт,
+`KZ_TAX_REPORT_TRUST_PROXY=true` и положительные лимиты TTL/загрузок. При
+отсутствии обязательной настройки процесс не запускается. Cloudflare Access
+должен ограничивать доступ политикой только для приглашённых пользователей и
+передавать подписанную cookie `CF_Authorization`. Для API также поддерживается
+Bearer-токен. Неподписанные identity-заголовки и пароли приложения не
+используются.
+
+Разверните образ из GHCR через Dokploy, подключите Cloudflare Tunnel к
+закрытому порту контейнера и оставьте firewall origin закрытым. Храните issuer,
+audience, URL JWKS, публичный URL, секрет сессии и лимиты в secrets/environment
+Dokploy, а не в образе. Используйте health check `/healthz`. Job и отчёты
+изолируются по authenticated subject, удаляются по TTL и не сохраняются в
+host output mount. R2 не используется: отчёты отдаются из временного
+job-каталога.
+
+Во время разбора сервер видит содержимое PDF и CSV в открытом виде. Это
+осознанный риск hosted-режима, а не zero-knowledge архитектура; через Access
+должны проходить только приглашённые пользователи.
+
+### Compose-файл для Dokploy
+
+Для Dokploy вставьте `docker-compose.prod.yml` в редактор Compose. По умолчанию
+используется `ghcr.io/variablesan/investments-kz-forms:latest`; для другого
+тега задайте `KZ_TAX_REPORT_IMAGE`. Перед запуском добавьте в environment/secrets
+Dokploy:
 
 - `KZ_TAX_REPORT_ACCESS_ISSUER`
 - `KZ_TAX_REPORT_ACCESS_AUDIENCE`
@@ -186,45 +303,41 @@ Dokploy environment/secrets before deploying:
 - `KZ_TAX_REPORT_MAX_UPLOAD_BYTES`
 - `KZ_TAX_REPORT_MAX_JOB_BYTES`
 
-The service listens on internal port `8080`; configure the Dokploy domain or
-Cloudflare Tunnel to route to that port. The production file uses hosted mode,
-an ephemeral job directory, and no host output mount. Keep Cloudflare Access
-as the only public ingress and set its policy to invite-only.
+Сервис слушает внутренний порт `8080`; настройте домен Dokploy или Cloudflare
+Tunnel на этот порт. Production-файл использует hosted-режим, временный
+job-каталог и не подключает output хоста. Оставьте Cloudflare Access единственной
+публичной точкой входа и включите политику только для приглашённых.
 
-## Browser UI
+## Браузерный интерфейс
 
-Run the local UI on `127.0.0.1:8080`:
+Запуск локального UI на `127.0.0.1:8080`:
 
 ```bash
 make web
 ```
 
-`make web` loads the project `.env` before starting the native UI. Running
-`uv run kz-tax-report-ui` directly does not load `.env`; export variables in
-the shell first when using that form.
+`make web` загружает `.env` перед запуском. При прямом вызове
+`uv run kz-tax-report-ui` переменные окружения нужно экспортировать отдельно.
 
-For a LAN deployment using Compose, review the privacy warning and run:
+Для запуска в LAN через Compose ознакомьтесь с предупреждением о приватности:
 
 ```bash
 make docker-build
 make docker-web
 ```
 
-The UI accepts an IBKR CSV, Freedom Bank PDF and annual-rate XLSX, with an
-optional 1042-S PDF. It shows calculated totals, 270.04 asset preparation and
-warnings before offering XLSX and Markdown downloads. Tax rules are internal
-year-specific YAML configuration and are not edited in the browser. The app
-does not transmit files to a tax authority or download government data.
+UI принимает CSV IBKR и XLSX со среднегодовыми курсами, а PDF Freedom Bank и
+1042-S являются необязательными. Он хранит текущий расчёт браузера 30 дней,
+удаляет исходные загрузки после успешной генерации и сохраняет доступные для
+скачивания XLSX и Markdown. Во вкладке «История» доступны завершённые расчёты
+текущего владельца. Налоговые правила хранятся во внутреннем YAML по годам и
+не редактируются в браузере. Приложение не отправляет файлы в налоговые органы
+и не скачивает государственные данные.
 
-## Tax Rules Disclaimer
+## Отказ от налоговых рекомендаций
 
-This is software for calculation assistance, not tax or legal advice. Rates,
-treaty treatment, exemptions, and Form 270.01 mappings must be verified against
-the applicable Kazakhstan Tax Code and official instructions for each year.
-Year-specific rules are versioned in YAML and should be verified before filing.
-
-## Plans
-
-The durable implementation context is in `tmp/plans/00-overview.md`. Attach it
-to every future coding session. Numbered plans describe the foundation,
-parsers, external sources and FIFO, tax/report CLI, and web UI phases.
+Это программа для помощи в расчётах, а не налоговая или юридическая
+консультация. Ставки, treaty treatment, освобождения и соответствие строк форме
+270.01 нужно проверять по действующему Налоговому кодексу Казахстана и
+официальным инструкциям за соответствующий год. Версионированные правила YAML
+нужно проверить перед подачей декларации.

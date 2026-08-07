@@ -1,6 +1,7 @@
 """Parse transaction tables from Freedom Bank investment PDFs."""
 
 import re
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -20,13 +21,32 @@ _ALIASES = {
 _REQUIRED_COLUMNS = ("date", "transaction_type", "quantity", "profit")
 
 
+@dataclass(frozen=True)
+class FreedomStatement:
+    """Freedom ledger plus explicit closing-position metadata from the PDF."""
+
+    transactions: pd.DataFrame
+    closing_position: dict[str, object] | None
+
+
 def parse_freedom_report(path: str | Path) -> pd.DataFrame:
     """Return transaction rows with physical PDF table provenance."""
 
+    return parse_freedom_statement(path).transactions
+
+
+def parse_freedom_statement(path: str | Path) -> FreedomStatement:
+    """Parse Freedom transactions and first-page closing-position metadata."""
+
     source_path = Path(path)
     records: list[dict[str, object]] = []
+    closing_position: dict[str, object] | None = None
     with pdfplumber.open(source_path) as pdf:
         for page_number, page in enumerate(pdf.pages, start=1):
+            if page_number == 1:
+                closing_position = _parse_closing_position(
+                    page.extract_text() or "", source_path.name
+                )
             for table_number, table in enumerate(page.extract_tables() or [], start=1):
                 if not table or not table[0]:
                     continue
@@ -79,7 +99,44 @@ def parse_freedom_report(path: str | Path) -> pd.DataFrame:
 
     if not records:
         raise ValueError(f"No Freedom transaction rows found: {source_path.name}")
-    return pd.DataFrame(records)
+    return FreedomStatement(pd.DataFrame(records), closing_position)
+
+
+def _parse_closing_position(text: str, source_name: str) -> dict[str, object] | None:
+    normalized = _clean_cell(text)
+    isin_match = re.search(r"\bISIN\s*:\s*([A-Z]{2}[A-Z0-9]{9,14})\b", normalized)
+    currency_match = re.search(
+        r"(?:Валюта счета|Код валюты номинала)\s*:\s*([A-Z]{3})\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    asset_match = re.search(
+        r"Вид ценной бумаги\s*:\s*([^:]+?)(?=\s+(?:Наименования|ISIN|Валюта|Код валюты)|$)",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    closing_match = re.search(
+        r"Доступно\s+на\s+\d{2}\.\d{2}\.\d{2,4}\s+([-+]?\d+(?:[.,]\d+)?)",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not any((isin_match, currency_match, asset_match, closing_match)):
+        return None
+    return {
+        "asset_class": asset_match.group(1).strip() if asset_match else "ETN",
+        "symbol": "",
+        "isin": isin_match.group(1) if isin_match else "",
+        "quantity": (
+            _decimal(closing_match.group(1), "Freedom closing quantity")
+            if closing_match
+            else Decimal("0")
+        ),
+        "currency": currency_match.group(1).upper() if currency_match else "",
+        "country": "",
+        "source_file": source_name,
+        "source_page": 1,
+        "source_row": 1,
+    }
 
 
 def _clean_cell(value: object) -> str:

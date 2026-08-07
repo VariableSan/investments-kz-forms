@@ -137,7 +137,9 @@ def test_1042s_year_filter_keeps_parser_year_records(tmp_path: Path) -> None:
     )
 
     assert report.foreign_tax_credit == Decimal("15")
-    assert not any("1042-S was not provided" in warning for warning in report.warnings)
+    assert not any(
+        "Форма 1042-S не предоставлена" in warning for warning in report.warnings
+    )
 
 
 def test_missing_sale_date_fails_instead_of_guessing(tmp_path: Path) -> None:
